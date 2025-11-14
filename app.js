@@ -2,6 +2,9 @@ const express = require("express");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const userRoutes = require("./routes/userRoutes");
+const postRoutes = require("./routes/postRoutes");
+const locationRoutes = require("./routes/locationRoutes.js");
+const heatmapRoutes = require("./routes/heatmapRoutes");
 const dotenv = require("dotenv");
 
 const app = express();
@@ -16,6 +19,9 @@ app.use(cors({
 
 // Routes
 app.use("/api/users", userRoutes);
+app.use("/api/posts", postRoutes);
+app.use("/api/location", locationRoutes);
+app.use("/api/crimes", heatmapRoutes);
 
 // Error handling
 app.use((err, req, res, next) => {

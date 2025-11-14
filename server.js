@@ -2,6 +2,7 @@ const app = require("./app"); // Express app
 const dotenv = require("dotenv");
 const http = require("http");
 const { Server } = require("socket.io");
+const cookieParser = require("cookie-parser");
 const connectDB = require("./config/db");
 
 // Load environment variables
