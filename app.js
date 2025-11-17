@@ -15,7 +15,8 @@ app.use(cookieParser());
 app.use(cors({
   origin: [
     "http://localhost:5173",
-    "https://repotics.vercel.app"
+    "https://repotics.vercel.app",
+     "https://repotics-backend.onrender.com"
   ],
   credentials: true,
 }));
