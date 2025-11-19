@@ -16,7 +16,7 @@ app.use(cors({
   origin: [
     "http://localhost:5173",
     "https://repotics.vercel.app",
-     "https://repotics-backend.onrender.com"
+    "https://repotics-backend.onrender.com"
   ],
   credentials: true,
 }));
