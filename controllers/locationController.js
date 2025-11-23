@@ -1,7 +1,6 @@
-// controllers/locationController.js
-import fetch from "node-fetch";
+const fetch = require("node-fetch");
 
-export const searchLocations = async (req, res) => {
+const searchLocations = async (req, res) => {
   try {
     const { q } = req.query;
     const response = await fetch(
@@ -15,7 +14,7 @@ export const searchLocations = async (req, res) => {
   }
 };
 
-export const reverseGeocode = async (req, res) => {
+const reverseGeocode = async (req, res) => {
   try {
     const { lat, lon } = req.query;
     const response = await fetch(
@@ -27,4 +26,9 @@ export const reverseGeocode = async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: "Reverse geocode failed" });
   }
+};
+
+module.exports = {
+  searchLocations,
+  reverseGeocode,
 };

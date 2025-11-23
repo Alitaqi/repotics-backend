@@ -3,8 +3,6 @@ const mongoose = require("mongoose");
 const connectDB = async () => {
   try {
     const conn = await mongoose.connect(process.env.MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
       autoIndex: false, // disable auto-creation of indexes in production for performance
       maxPoolSize: 10,  // maintain up to 10 socket connections
       serverSelectionTimeoutMS: 5000, // throw error if no server within 5s

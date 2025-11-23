@@ -302,12 +302,37 @@ const downvotePost = async (req, res) => {
 
 // 🔹 Get all posts (feed) ////////later add algorithm of posts
 // 🔹 Update getPostById to include ownership info
+// const getPostById = async (req, res) => {
+//   try {
+//     const currentUserId = req.user?.id;
+//     const post = await Post.findById(req.params.postId)
+//       .populate("user", "name username profilePicture verified")
+//       .populate("comments.user", "name username profilePicture verified");
+
+//     if (!post) return res.status(404).json({ message: "Post not found" });
+
+//     const postObj = post.toObject();
+//     postObj.isOwner = currentUserId && post.user._id.toString() === currentUserId.toString();
+    
+//     if (currentUserId) {
+//       postObj.userVote = post.upvotes.includes(currentUserId) ? 'upvote' : 
+//                         post.downvotes.includes(currentUserId) ? 'downvote' : null;
+//     }
+
+//     res.json(postObj);
+//   } catch (error) {
+//     console.error("Get Post Error:", error);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// }; change bcs of reply issue 
+
 const getPostById = async (req, res) => {
   try {
     const currentUserId = req.user?.id;
     const post = await Post.findById(req.params.postId)
       .populate("user", "name username profilePicture verified")
-      .populate("comments.user", "name username profilePicture verified");
+      .populate("comments.user", "name username profilePicture verified")
+      .populate("comments.replies.user", "name username profilePicture verified"); // Add this line
 
     if (!post) return res.status(404).json({ message: "Post not found" });
 
@@ -317,6 +342,46 @@ const getPostById = async (req, res) => {
     if (currentUserId) {
       postObj.userVote = post.upvotes.includes(currentUserId) ? 'upvote' : 
                         post.downvotes.includes(currentUserId) ? 'downvote' : null;
+
+      // Process comments and replies with userVote and isOwner (similar to getUserPosts)
+      postObj.comments = postObj.comments.map(comment => {
+        const commentUserId = comment.user?._id?.toString();
+        return {
+          ...comment,
+          user: {
+            _id: commentUserId,
+            name: comment.user?.name,
+            username: comment.user?.username,
+            profilePicture: comment.user?.profilePicture,
+            verified: comment.user?.verified,
+          },
+          userVote: comment.upvotes.includes(currentUserId)
+            ? "upvote"
+            : comment.downvotes.includes(currentUserId)
+            ? "downvote"
+            : null,
+          isOwner: commentUserId === currentUserId,
+          replies: comment.replies.map(reply => {
+            const replyUserId = reply.user?._id?.toString();
+            return {
+              ...reply,
+              user: {
+                _id: replyUserId,
+                name: reply.user?.name,
+                username: reply.user?.username,
+                profilePicture: reply.user?.profilePicture,
+                verified: reply.user?.verified,
+              },
+              userVote: reply.upvotes.includes(currentUserId)
+                ? "upvote"
+                : reply.downvotes.includes(currentUserId)
+                ? "downvote"
+                : null,
+              isOwner: replyUserId === currentUserId,
+            };
+          }),
+        };
+      });
     }
 
     res.json(postObj);

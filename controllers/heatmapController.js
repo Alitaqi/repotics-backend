@@ -1,5 +1,4 @@
-// controllers/heatmapController.js
-import Post from "../models/Post.js";
+const Post = require("../models/Post");
 
 const getCrimeHeatmapData = async (req, res) => {
   try {
@@ -47,4 +46,6 @@ const getCrimeHeatmapData = async (req, res) => {
   }
 };
 
-export { getCrimeHeatmapData };
+module.exports = {
+  getCrimeHeatmapData,
+};
