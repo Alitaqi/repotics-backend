@@ -87,10 +87,18 @@ const loginUser = async (req, res) => {
   });
 
   res.json({
-    _id: user._id,
-    name: user.name,
-    email: user.email,
-    username: user.username,
+     _id: user._id,
+        name: user.name,
+        email: user.email,
+        username: user.username,
+        bio: user.bio || "Vigilante by night. Billionaire by day.",
+        bannerPicture: user.bannerPicture || "",
+        badges: user.badges || [],
+        profilePicture: user.profilePicture || "", // fallback if empty
+        banner: user.banner || "",
+        followers: Array.isArray(user.followers) ? user.followers.length : 0,
+        following: Array.isArray(user.following) ? user.following.length : 0,
+        postsCount: user.postsCount || 0,
   });
   }catch (error) {
       console.error("Login Error:", error);
@@ -237,7 +245,6 @@ const followUser = async (req, res) => {
   }
 };
 
-// Unfollow a user
 // Unfollow a user
 const unfollowUser = async (req, res) => {
   try {

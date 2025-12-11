@@ -6,6 +6,10 @@ const path = require("path");
 const fs = require("fs");
 const mongoose = require("mongoose");
 const haversine = require("haversine-distance");
+const OpenAI = require("openai");
+const axios = require("axios");
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 
 
 
@@ -43,6 +47,31 @@ const uploadToCloudinary = (fileBuffer, folder = "posts") => {
     readStream.pipe(uploadStream);
   });
 };
+
+// Convert Cloudinary URL → Base64 url
+async function urlToBase64(url) {
+  try {
+    const response = await axios.get(url, { 
+      responseType: "arraybuffer",
+      timeout: 10000 // optional: prevent hanging
+    });
+
+    // Detect MIME type from response headers (fallback to jpeg)
+    const contentType = response.headers['content-type'] || 'image/jpeg';
+
+    // Convert buffer to base64
+    const base64 = Buffer.from(response.data, 'binary').toString('base64');
+
+    // Return full data URL → this is what OpenAI expects!
+    return `data:${contentType};base64,${base64}`;
+  } catch (err) {
+    console.error("Error converting image to base64:", err.message || err);
+    return null;
+  }
+}
+// User approves or eidts sumary -> trigger heavy AI Job
+// /posts/:postId/approve-summary
+
 
 // 🔹 Create a post with proper error handling
 const createPost = async (req, res) => {
@@ -107,7 +136,7 @@ const createPost = async (req, res) => {
       }
     }
 
-    // Create the post
+    // Save the post first
     const post = await Post.create({
       user: req.user.id,
       incidentDescription,
@@ -120,6 +149,12 @@ const createPost = async (req, res) => {
       agreed: agreed === "true",
       images: uploadedImages,
       description: incidentDescription,
+       aiReport: {
+        status: "processing_summary",
+        shortSummary: null,
+        fullReport: null,
+        extractedData: null,
+      },
     });
 
     console.log('Post created successfully with ID:', post._id);
@@ -134,39 +169,269 @@ const createPost = async (req, res) => {
         }
       });
     }
+     // ---------- Generate Short Summary via OpenAI ----------
+    let aiSummary = null;
+    try {
+      const response = await client.chat.completions.create({
+        model: "gpt-4.1-mini",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are an AI crime summarizer. Create a short readable summary for a public crime report. Keep it neutral and under 3 sentences.",
+          },
+          {
+            role: "user",
+            content: `
+Crime Type: ${crimeType}
+Incident Details: ${incidentDescription || "No details provided."}
+Location: ${locationText}
+Date: ${date} at ${time}
 
-    res.status(201).json({
-      message: "Post created successfully",
-      post: post
+Image URLs: ${uploadedImages.join("\n")}
+`,
+          },
+        ],
+      });
+
+      aiSummary = response.choices[0].message.content.trim();
+    } catch (aiError) {
+      console.error("AI summary error → fallback to description");
+      aiSummary = incidentDescription;
+    }
+
+    // ---------- Update Post with Summary ----------
+    post.aiReport.shortSummary = aiSummary;
+    post.aiReport.status = "awaiting_user_approval";
+    await post.save();
+
+    await User.findByIdAndUpdate(req.user.id, { $inc: { postsCount: 1 } });
+
+    return res.status(201).json({
+      message: "Post created. AI summary ready for approval.",
+      post,
+      aiSummary,
+      requiresApproval: true,
     });
-    
   } catch (error) {
     console.error("Create Post Error:", error);
-    
-    // Specific error handling
-    if (error.code === 'ECONNRESET') {
-      console.log('Client disconnected during upload');
-      return res.status(499).json({ message: "Upload was cancelled" });
-    }
-    
-    if (error.message.includes('File too large') || error.message.includes('exceeds 5MB limit')) {
-      return res.status(400).json({ message: "File too large. Maximum 5MB per file." });
-    }
-    
-    if (error.message.includes('timeout')) {
-      return res.status(408).json({ message: "Upload timeout. Please try again with smaller files." });
-    }
-    
-    if (error.message.includes('Only image files')) {
-      return res.status(400).json({ message: "Invalid file type. Only images are allowed." });
-    }
-    
-    res.status(500).json({ 
+
+    return res.status(500).json({
       message: "Server error while creating post",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
+
+
+//new one 
+const finalizeReport = async (req, res) => {
+  const { postId } = req.params;
+  const { description } = req.body;
+
+  try {
+    const post = await Post.findById(postId);
+    if (!post)
+      return res.status(404).json({ message: "Post not found" });
+
+    // If user edited the short summary
+    if (description) {
+      post.aiReport.shortSummary = description;
+      post.description = description; // <-- updated here
+    }
+
+    post.aiReport.status = "processing_full_report";
+    await post.save();
+
+    // ----------------------------------------------------------
+    // STEP 1 — Convert Cloudinary Images → Base64
+    // ----------------------------------------------------------
+    const imageInputs = [];
+    for (const url of post.images) {
+      const dataUrl = await urlToBase64(url);
+      if (dataUrl) {
+        imageInputs.push({
+          type: "image_url",
+          image_url: { url: dataUrl},
+        });
+      }
+    }
+
+    // ----------------------------------------------------------
+    // STEP 2 — Build prompt for AI (image + text)
+    // ----------------------------------------------------------
+    const messages = [
+      {
+        role: "system",
+        content: `
+You are an advanced Law Enforcement AI specializing in crime scene forensics.
+Analyze ALL images + text and return TWO outputs:
+
+1) A SINGLE long narrative paragraph describing the full forensic incident report.  
+   - No headings  
+   - No markdown  
+   - No bullet points  
+   - No labels  
+   - No bold text  
+   - No section titles  
+   - No "incident overview", "scene analysis", "victim" etc  
+   - No "JSON summary" mention  
+   - Just ONE clean paragraph of narrative text.
+
+2) After the narrative paragraph, return a STRICT JSON object ONLY with this exact shape:
+
+{
+  "weapons": ["AK47", "Glock", "Knife"],
+  "vehicleTypes": ["Toyota Corolla", "Motorcycle"],
+  "licensePlates": ["ABC-123", "LZE 9083"],
+  "suspectsCount": 2,
+  "facesDetected": 3,
+  "ocrText": "detected text from signs/plates/etc",
+  "confidenceScore": 0.87
+}
+
+RULES:
+- If unsure, return approximate values (e.g. "2 pistols", "1 car").
+- Do NOT add extra fields.
+- Do NOT invent details without visual or textual evidence.
+- JSON must be raw and parseable.
+- Never wrap JSON in markdown.
+        `,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: `
+Short Summary: ${post.aiReport.shortSummary}
+Incident Description: ${post.incidentDescription}
+Crime Type: ${post.crimeType}
+Location: ${post.locationText}
+Date: ${post.date}
+Time: ${post.time}
+Coordinates: ${post.coordinates?.lat}, ${post.coordinates?.lng}
+            `
+          },
+          ...imageInputs,
+        ],
+      },
+    ];
+
+    // ----------------------------------------------------------
+    // STEP 3 — Generate full report using OpenAI Vision
+    // ----------------------------------------------------------
+    let fullTextOutput = "";
+    try {
+      const aiRes = await client.chat.completions.create({
+        model: "gpt-4.1",
+        messages,
+        temperature: 0.2,
+        max_tokens: 4096
+      });
+
+      fullTextOutput = aiRes.choices[0].message.content;
+    } catch (err) {
+      console.error("AI Failed:", err);
+      fullTextOutput = "AI could not generate full report.";
+    }
+
+    // ----------------------------------------------------------
+    // STEP 4 — Extract JSON + Narrative
+    // ----------------------------------------------------------
+    let extractedJSON = null;
+    let narrativeReport = fullTextOutput;
+
+    // Try to extract JSON safely
+    const jsonMatch = fullTextOutput.match(/\{[\s\S]*\}$/);
+    if (jsonMatch) {
+      try {
+        extractedJSON = JSON.parse(jsonMatch[0]);
+        narrativeReport = fullTextOutput.replace(jsonMatch[0], "").trim();
+      } catch (err) {
+        console.error("JSON parse failed:", err);
+      }
+    }
+
+    // ----------------------------------------------------------
+    // STEP 5 — Save to MongoDB in correct schema fields
+    // ----------------------------------------------------------
+    if (extractedJSON) {
+      post.aiReport.extracted.weapons =
+        extractedJSON.weapons || [];
+
+      post.aiReport.extracted.vehicleTypes =
+        extractedJSON.vehicleTypes || [];
+
+      post.aiReport.extracted.licensePlates =
+        extractedJSON.licensePlates || [];
+
+      post.aiReport.extracted.suspectsCount =
+        extractedJSON.suspectsCount ?? null;
+
+      post.aiReport.extracted.facesDetected =
+        extractedJSON.facesDetected ?? null;
+
+      post.aiReport.extracted.ocrText =
+        extractedJSON.ocrText || "";
+
+      post.aiReport.confidenceScore =
+        extractedJSON.confidenceScore ?? 0;
+    }
+
+    post.aiReport.fullReport = narrativeReport;
+    post.aiReport.status = "completed";
+
+    await post.save();
+
+    return res.status(200).json({
+      message: "Full AI report generated successfully",
+      fullReport: narrativeReport,
+      extracted: extractedJSON,
+      post,
+    });
+  } catch (err) {
+    console.error("Finalize Report Error:", err);
+    return res
+      .status(500)
+      .json({ message: "Server error while finalizing report" });
+  }
+};
+
+
+
+//     res.status(201).json({
+//       message: "Post created successfully",
+//       post: post
+//     });
+    
+//   } catch (error) {
+//     console.error("Create Post Error:", error);
+    
+//     // Specific error handling
+//     if (error.code === 'ECONNRESET') {
+//       console.log('Client disconnected during upload');
+//       return res.status(499).json({ message: "Upload was cancelled" });
+//     }
+    
+//     if (error.message.includes('File too large') || error.message.includes('exceeds 5MB limit')) {
+//       return res.status(400).json({ message: "File too large. Maximum 5MB per file." });
+//     }
+    
+//     if (error.message.includes('timeout')) {
+//       return res.status(408).json({ message: "Upload timeout. Please try again with smaller files." });
+//     }
+    
+//     if (error.message.includes('Only image files')) {
+//       return res.status(400).json({ message: "Invalid file type. Only images are allowed." });
+//     }
+    
+//     res.status(500).json({ 
+//       message: "Server error while creating post",
+//       error: process.env.NODE_ENV === 'development' ? error.message : undefined
+//     });
+//   }
+// };
 
 // 🔹 Get posts by a specific user
 // const getUserPosts = async (req, res) => {
@@ -462,6 +727,8 @@ const deletePost = async (req, res) => {
     }
 
     await post.deleteOne();
+    await User.findByIdAndUpdate(post.user, { $inc: { postsCount: -1 } });
+
     res.json({ message: "Post deleted successfully" });
   } catch (error) {
     console.error("Delete Post Error:", error);
@@ -697,6 +964,45 @@ const deleteComment = async (req, res) => {
 };
 
 
+const deleteReply = async (req, res) => {
+  try {
+    const { postId, commentId, replyId } = req.params;
+
+    // ✅ Always normalize userId to string
+    const userId = req.user?._id?.toString() || req.user?.id?.toString();
+
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    const comment = post.comments.id(commentId);
+    if (!comment) return res.status(404).json({ message: "Comment not found" });
+
+    const reply = comment.replies.id(replyId);
+    if (!reply) return res.status(404).json({ message: "Reply not found" });
+
+    // ✅ Normalize reply.user to string
+    const replyUserId =
+      reply.user?._id?.toString() || reply.user?.toString();
+
+    console.log("Delete Reply Debug:");
+    console.log("Current userId:", userId);
+    console.log("Reply ownerId:", replyUserId);
+
+    if (replyUserId !== userId) {
+      console.log("❌ Unauthorized: IDs don't match");
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    reply.deleteOne();
+    await post.save();
+
+    res.json({ message: "Reply deleted successfully" });
+  } catch (error) {
+    console.error("Delete Reply Error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 
 
 // Update your existing functions to properly populate comments
@@ -765,54 +1071,90 @@ const getUserPosts = async (req, res) => {
         currentUserId &&
         post.user._id.toString() === currentUserId.toString();
 
-      if (currentUserId) {
-        // ✅ Mark vote status on post
-        postObj.userVote = post.upvotes.includes(currentUserId)
-          ? "upvote"
-          : post.downvotes.includes(currentUserId)
-          ? "downvote"
-          : null;
+      // if (currentUserId) {
+      //   // ✅ Mark vote status on post
+      //   postObj.userVote = post.upvotes.includes(currentUserId)
+      //     ? "upvote"
+      //     : post.downvotes.includes(currentUserId)
+      //     ? "downvote"
+      //     : null;
 
-        // ✅ Process comments
-        postObj.comments = postObj.comments.map(comment => {
-          const commentUserId = comment.user?._id?.toString();
-          return {
-            ...comment,
-            user: {
-              _id: commentUserId,
-              name: comment.user?.name,
-              username: comment.user?.username,
-              profilePicture: comment.user?.profilePicture,
-              verified: comment.user?.verified,
-            },
-            userVote: comment.upvotes.includes(currentUserId)
-              ? "upvote"
-              : comment.downvotes.includes(currentUserId)
-              ? "downvote"
-              : null,
-            isOwner: commentUserId === currentUserId, // ✅ mark comment ownership
-            replies: comment.replies.map(reply => {
-              const replyUserId = reply.user?._id?.toString();
-              return {
-                ...reply,
-                user: {
-                  _id: replyUserId,
-                  name: reply.user?.name,
-                  username: reply.user?.username,
-                  profilePicture: reply.user?.profilePicture,
-                  verified: reply.user?.verified,
-                },
-                userVote: reply.upvotes.includes(currentUserId)
-                  ? "upvote"
-                  : reply.downvotes.includes(currentUserId)
-                  ? "downvote"
-                  : null,
-                isOwner: replyUserId === currentUserId, // ✅ mark reply ownership
-              };
-            }),
-          };
-        });
-      }
+      //   // ✅ Process comments
+      //   postObj.comments = postObj.comments.map(comment => {
+      //     const commentUserId = comment.user?._id?.toString();
+      //     return {
+      //       ...comment,
+      //       user: {
+      //         _id: commentUserId,
+      //         name: comment.user?.name,
+      //         username: comment.user?.username,
+      //         profilePicture: comment.user?.profilePicture,
+      //         verified: comment.user?.verified,
+      //       },
+      //       userVote: comment.upvotes.includes(currentUserId)
+      //         ? "upvote"
+      //         : comment.downvotes.includes(currentUserId)
+      //         ? "downvote"
+      //         : null,
+      //       isOwner: commentUserId === currentUserId, // ✅ mark comment ownership
+      //       replies: comment.replies.map(reply => {
+      //         const replyUserId = reply.user?._id?.toString();
+      //         return {
+      //           ...reply,
+      //           user: {
+      //             _id: replyUserId,
+      //             name: reply.user?.name,
+      //             username: reply.user?.username,
+      //             profilePicture: reply.user?.profilePicture,
+      //             verified: reply.user?.verified,
+      //           },
+      //           userVote: reply.upvotes.includes(currentUserId)
+      //             ? "upvote"
+      //             : reply.downvotes.includes(currentUserId)
+      //             ? "downvote"
+      //             : null,
+      //           isOwner: replyUserId === currentUserId, // ✅ mark reply ownership
+      //         };
+      //       }),
+      //     };
+      //   });
+      // }
+      if (currentUserId) {
+  // ✅ Mark vote status on post
+  const currentUserIdStr = currentUserId.toString();
+
+  postObj.userVote = post.upvotes.map(id => id.toString()).includes(currentUserIdStr)
+    ? "upvote"
+    : post.downvotes.map(id => id.toString()).includes(currentUserIdStr)
+    ? "downvote"
+    : null;
+
+  // ✅ Process comments similarly
+  postObj.comments = postObj.comments.map(comment => {
+    const commentUserId = comment.user?._id?.toString();
+    return {
+      ...comment,
+      userVote: comment.upvotes.map(id => id.toString()).includes(currentUserIdStr)
+        ? "upvote"
+        : comment.downvotes.map(id => id.toString()).includes(currentUserIdStr)
+        ? "downvote"
+        : null,
+      isOwner: commentUserId === currentUserIdStr,
+      replies: comment.replies.map(reply => {
+        const replyUserId = reply.user?._id?.toString();
+        return {
+          ...reply,
+          userVote: reply.upvotes.map(id => id.toString()).includes(currentUserIdStr)
+            ? "upvote"
+            : reply.downvotes.map(id => id.toString()).includes(currentUserIdStr)
+            ? "downvote"
+            : null,
+          isOwner: replyUserId === currentUserIdStr,
+        };
+      }),
+    };
+  });
+}
 
       return postObj;
     });
@@ -824,45 +1166,6 @@ const getUserPosts = async (req, res) => {
   }
 };
 
-
-const deleteReply = async (req, res) => {
-  try {
-    const { postId, commentId, replyId } = req.params;
-
-    // ✅ Always normalize userId to string
-    const userId = req.user?._id?.toString() || req.user?.id?.toString();
-
-    const post = await Post.findById(postId);
-    if (!post) return res.status(404).json({ message: "Post not found" });
-
-    const comment = post.comments.id(commentId);
-    if (!comment) return res.status(404).json({ message: "Comment not found" });
-
-    const reply = comment.replies.id(replyId);
-    if (!reply) return res.status(404).json({ message: "Reply not found" });
-
-    // ✅ Normalize reply.user to string
-    const replyUserId =
-      reply.user?._id?.toString() || reply.user?.toString();
-
-    console.log("Delete Reply Debug:");
-    console.log("Current userId:", userId);
-    console.log("Reply ownerId:", replyUserId);
-
-    if (replyUserId !== userId) {
-      console.log("❌ Unauthorized: IDs don't match");
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
-    reply.deleteOne();
-    await post.save();
-
-    res.json({ message: "Reply deleted successfully" });
-  } catch (error) {
-    console.error("Delete Reply Error:", error);
-    res.status(500).json({ message: "Server error" });
-  }
-};
 
 
 // Personalized feed
@@ -1086,6 +1389,7 @@ module.exports = {
   getAllPosts,
   getPostById,
   getUserPosts,
+  finalizeReport,
   updatePost,
   deletePost,
   upvotePost,

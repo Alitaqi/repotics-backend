@@ -49,39 +49,72 @@ const commentSchema = new mongoose.Schema({
   }
 });
 
+
+// 🔥 AI Analysis Schema (forensics + summary + extracted data)
+const aiReportSchema = new mongoose.Schema({
+  status: {
+    type: String,
+    enum: ["pending", "processing", "completed", "failed", "processing_summary", "awaiting_user_approval" ,"processing_full_report"],
+    default: "pending"
+  },
+
+  // --- Public-facing AI output ---
+  shortSummary: { type: String },  // user can edit this
+
+  // --- Government / full forensic analysis ---
+  fullReport: { type: String }, // long formatted law enforcement report
+
+  // --- AI extracted structured fields ---
+  extracted: {
+    weapons: [{ type: String }], // ["AK47", "Glock", "Unknown pistol"]
+    vehicleTypes: [{ type: String }], // ["Toyota Corolla", "Motorcycle", "Van"]
+    licensePlates: [{ type: String }], // OCR
+    suspectsCount: { type: Number },
+    facesDetected: { type: Number },
+    ocrText: { type: String }, // detected environment text (signboards, writing etc.)
+  },
+
+  confidenceScore: { type: Number }, // AI confidence (0–1 scale)
+  
+  reviewedByUser: { type: Boolean, default: false }, // user confirmed summary
+  reviewedAt: { type: Date },
+
+}, { timestamps: true });
+
+
+
+
 const postSchema = new mongoose.Schema(
   {
-    // 🔹 General post data
+    // 🔹 User & Create Info
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    description: { type: String }, // AI-generated 
-    images: [{ type: String }], // Cloudinary URLs
+
+    // 🔹 Public Post Data
+    description: { type: String }, 
+    images: [{ type: String }],
     tags: [{ type: String }],
 
-    // 🔹 Engagement
     likes: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     comments: [commentSchema],
 
-    // 🔹 Structured crime report fields
+    // 🔹 Raw user-submitted crime report fields
     incidentDescription: { type: String },
-    crimeType: { type: String, required: true }, // "Theft", "Fraud", etc
-    date: { type: String, required: true }, // stored as YYYY-MM-DD
-    time: { type: String, required: true }, // stored as HH:mm
-    locationText: { type: String, required: true }, // human-readable
+    crimeType: { type: String, required: true },
+    date: { type: String, required: true },
+    time: { type: String, required: true },
+    locationText: { type: String, required: true },
     coordinates: {
       lat: { type: Number },
       lng: { type: Number },
     },
     anonymous: { type: Boolean, default: false },
-    agreed: { type: Boolean, default: false }, // checkbox "I confirm..."
+    agreed: { type: Boolean, default: false },
 
-    upvotes: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    }],
-    downvotes: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    }],
+    upvotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    downvotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+
+    // 🔥 NEW: attach the AI report object
+    aiReport: aiReportSchema,
   },
   { timestamps: true }
 );

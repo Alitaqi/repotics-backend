@@ -4,6 +4,7 @@ const router = express.Router();
 const {
   createPost,
   getAllPosts,
+  finalizeReport,
   getPostById,
   getUserPosts,
   updatePost,
@@ -29,6 +30,8 @@ router.get("/feed", authMiddleware, getPersonalizedFeed);
 // Create post
 router.post("/", authMiddleware, upload.array("images", 5), handleMulterError, createPost);
 
+// Finalize report
+router.post("/:postId/finalize", authMiddleware, finalizeReport);
 // Get all posts (feed)
 router.get("/", getAllPosts);
 
