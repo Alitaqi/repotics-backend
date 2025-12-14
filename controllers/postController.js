@@ -1052,13 +1052,12 @@ const deleteReply = async (req, res) => {
 const getUserPosts = async (req, res) => {
   try {
     const { username } = req.params;
-    const currentUserId = req.user?.id; 
-
+    const currentUserId = req.user?._id?.toString() || req.user?.id?.toString();
     const user = await User.findOne({ username });
     if (!user) return res.status(404).json({ message: "User not found" });
 
     const posts = await Post.find({ user: user._id })
-      .populate("user", "name username profilePicture verified")
+      .populate("user", "name username profilePicture verified location coordinates")
       .populate("comments.user", "name username profilePicture verified")
       .populate("comments.replies.user", "name username profilePicture verified")
       .sort({ createdAt: -1 });
@@ -1066,105 +1065,60 @@ const getUserPosts = async (req, res) => {
     const postsWithOwnership = posts.map(post => {
       const postObj = post.toObject();
 
-      // ✅ Check if current user is the post owner
-      postObj.isOwner =
-        currentUserId &&
-        post.user._id.toString() === currentUserId.toString();
+      // Add post ownership
+      postObj.isOwner = currentUserId && post.user._id.toString() === currentUserId;
 
-      // if (currentUserId) {
-      //   // ✅ Mark vote status on post
-      //   postObj.userVote = post.upvotes.includes(currentUserId)
-      //     ? "upvote"
-      //     : post.downvotes.includes(currentUserId)
-      //     ? "downvote"
-      //     : null;
+      // Add userVote for post
+      postObj.userVote = null;
+if (currentUserId) {
+  const upvoteIds = post.upvotes.map(id => id.toString());
+  const downvoteIds = post.downvotes.map(id => id.toString());
 
-      //   // ✅ Process comments
-      //   postObj.comments = postObj.comments.map(comment => {
-      //     const commentUserId = comment.user?._id?.toString();
-      //     return {
-      //       ...comment,
-      //       user: {
-      //         _id: commentUserId,
-      //         name: comment.user?.name,
-      //         username: comment.user?.username,
-      //         profilePicture: comment.user?.profilePicture,
-      //         verified: comment.user?.verified,
-      //       },
-      //       userVote: comment.upvotes.includes(currentUserId)
-      //         ? "upvote"
-      //         : comment.downvotes.includes(currentUserId)
-      //         ? "downvote"
-      //         : null,
-      //       isOwner: commentUserId === currentUserId, // ✅ mark comment ownership
-      //       replies: comment.replies.map(reply => {
-      //         const replyUserId = reply.user?._id?.toString();
-      //         return {
-      //           ...reply,
-      //           user: {
-      //             _id: replyUserId,
-      //             name: reply.user?.name,
-      //             username: reply.user?.username,
-      //             profilePicture: reply.user?.profilePicture,
-      //             verified: reply.user?.verified,
-      //           },
-      //           userVote: reply.upvotes.includes(currentUserId)
-      //             ? "upvote"
-      //             : reply.downvotes.includes(currentUserId)
-      //             ? "downvote"
-      //             : null,
-      //           isOwner: replyUserId === currentUserId, // ✅ mark reply ownership
-      //         };
-      //       }),
-      //     };
-      //   });
-      // }
-      if (currentUserId) {
-  // ✅ Mark vote status on post
-  const currentUserIdStr = currentUserId.toString();
-
-  postObj.userVote = post.upvotes.map(id => id.toString()).includes(currentUserIdStr)
-    ? "upvote"
-    : post.downvotes.map(id => id.toString()).includes(currentUserIdStr)
-    ? "downvote"
-    : null;
-
-  // ✅ Process comments similarly
-  postObj.comments = postObj.comments.map(comment => {
-    const commentUserId = comment.user?._id?.toString();
-    return {
-      ...comment,
-      userVote: comment.upvotes.map(id => id.toString()).includes(currentUserIdStr)
-        ? "upvote"
-        : comment.downvotes.map(id => id.toString()).includes(currentUserIdStr)
-        ? "downvote"
-        : null,
-      isOwner: commentUserId === currentUserIdStr,
-      replies: comment.replies.map(reply => {
-        const replyUserId = reply.user?._id?.toString();
-        return {
-          ...reply,
-          userVote: reply.upvotes.map(id => id.toString()).includes(currentUserIdStr)
-            ? "upvote"
-            : reply.downvotes.map(id => id.toString()).includes(currentUserIdStr)
-            ? "downvote"
-            : null,
-          isOwner: replyUserId === currentUserIdStr,
-        };
-      }),
-    };
-  });
+  if (upvoteIds.includes(currentUserId)) postObj.userVote = "upvote";
+  else if (downvoteIds.includes(currentUserId)) postObj.userVote = "downvote";
 }
+
+
+      // Process comments
+      postObj.comments = postObj.comments.map(comment => {
+        const commentUserId = comment.user?._id?.toString();
+        return {
+          ...comment,
+          isOwner: currentUserId === commentUserId,
+          userVote: currentUserId
+            ? comment.upvotes.map(id => id.toString()).includes(currentUserId)
+              ? "upvote"
+              : comment.downvotes.map(id => id.toString()).includes(currentUserId)
+              ? "downvote"
+              : null
+            : null,
+          replies: comment.replies.map(reply => {
+            const replyUserId = reply.user?._id?.toString();
+            return {
+              ...reply,
+              isOwner: currentUserId === replyUserId,
+              userVote: currentUserId
+                ? reply.upvotes.map(id => id.toString()).includes(currentUserId)
+                  ? "upvote"
+                  : reply.downvotes.map(id => id.toString()).includes(currentUserId)
+                  ? "downvote"
+                  : null
+                : null,
+            };
+          }),
+        };
+      });
 
       return postObj;
     });
-
+    console.log(currentUserId);
     res.json(postsWithOwnership);
   } catch (error) {
     console.error("Get User Posts Error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
+
 
 
 
@@ -1242,6 +1196,141 @@ const getUserPosts = async (req, res) => {
 // };
 // controllers/feedController.js
 
+
+// const getPersonalizedFeed = async (req, res) => {
+//   try {
+//     const userId = req.user.id;
+//     const { cursor, limit = 10 } = req.query;
+
+//     // 1️⃣ Get current user
+//     const currentUser = await User.findById(userId).select("following location coordinates");
+//     if (!currentUser) {
+//       return res.status(404).json({ message: "User not found" });
+//     }
+
+//     // 2️⃣ Base query
+//     const query = {};
+//     if (cursor) query.createdAt = { $lt: new Date(cursor) };
+
+//     // 3️⃣ Fetch posts
+//     const posts = await Post.find(query)
+//       .populate("user", "username name profilePicture location coordinates verified")
+//       .populate("comments.user", "name username profilePicture verified")
+//       .populate("comments.replies.user", "name username profilePicture verified")
+//       .sort({ createdAt: -1 })
+//       .limit(Number(limit) + 1);
+
+//     // 4️⃣ Scoring logic
+//     const scoredPosts = posts.map((post) => {
+//       let score = 0;
+
+//       // --- Following factor ---
+//       if (currentUser.following.some((id) => id.equals(post.user._id))) score += 3;
+
+//       // --- Location text match (e.g. same city) ---
+//       if (
+//         currentUser.location &&
+//         post.user.location &&
+//         currentUser.location.toLowerCase() === post.user.location.toLowerCase()
+//       ) {
+//         score += 2;
+//       }
+
+//       // --- Coordinate-based distance scoring ---
+//       if (currentUser.coordinates && post.user.coordinates) {
+//         const userCoords = {
+//           lat: currentUser.coordinates.lat,
+//           lon: currentUser.coordinates.lng,
+//         };
+//         const postCoords = {
+//           lat: post.user.coordinates.lat,
+//           lon: post.user.coordinates.lng,
+//         };
+
+//         const distanceKm = haversine(userCoords, postCoords) / 1000; // convert meters → km
+
+//         // The closer, the higher the score
+//         if (distanceKm < 5) score += 3;
+//         else if (distanceKm < 20) score += 2;
+//         else if (distanceKm < 50) score += 1;
+//       }
+
+//       // --- Recency factor ---
+//       const hoursSince = (Date.now() - new Date(post.createdAt)) / (1000 * 60 * 60);
+//       if (hoursSince < 24) score += 2;
+//       else if (hoursSince < 72) score += 1;
+
+//       // --- Engagement factor ---
+//       const engagement =
+//         (post.likes?.length || 0) +
+//         (post.upvotes?.length || 0) -
+//         (post.downvotes?.length || 0) +
+//         (post.comments?.length || 0);
+
+//       if (engagement > 20) score += 2;
+//       else if (engagement > 5) score += 1;
+
+//       return { post, score };
+//     });
+
+//     // 5️⃣ Sort by score (descending)
+//     scoredPosts.sort((a, b) => b.score - a.score);
+
+//     // 6️⃣ Format posts for frontend
+//     const feed = scoredPosts.slice(0, limit).map(({ post, score }) => {
+//       const postObj = post.toObject();
+//       const currentUserIdStr = userId.toString();
+
+//       // --- Post vote ---
+//       postObj.userVote = post.upvotes.some((id) => id.equals(userId))
+//         ? "upvote"
+//         : post.downvotes.some((id) => id.equals(userId))
+//         ? "downvote"
+//         : null;
+
+//       // --- Process comments ---
+//       postObj.comments = postObj.comments.map((comment) => {
+//         const commentUserId = comment.user?._id?.toString();
+//         return {
+//           ...comment,
+//           userVote: comment.upvotes.includes(userId)
+//             ? "upvote"
+//             : comment.downvotes.includes(userId)
+//             ? "downvote"
+//             : null,
+//           isOwner: commentUserId === currentUserIdStr,
+//           replies: comment.replies.map((reply) => {
+//             const replyUserId = reply.user?._id?.toString();
+//             return {
+//               ...reply,
+//               userVote: reply.upvotes.includes(userId)
+//                 ? "upvote"
+//                 : reply.downvotes.includes(userId)
+//                 ? "downvote"
+//                 : null,
+//               isOwner: replyUserId === currentUserIdStr,
+//             };
+//           }),
+//         };
+//       });
+
+//       postObj.relevanceScore = score;
+//       return postObj;
+//     });
+
+//     // 7️⃣ Pagination
+//     const nextCursor = posts.length > limit ? posts[limit - 1].createdAt : null;
+
+//     res.json({
+//       feed,
+//       nextCursor,
+//       hasMore: !!nextCursor,
+//     });
+//   } catch (error) {
+//     console.error("Feed Error:", error);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
 
 const getPersonalizedFeed = async (req, res) => {
   try {
@@ -1335,23 +1424,41 @@ const getPersonalizedFeed = async (req, res) => {
         : null;
 
       // --- Process comments ---
-      postObj.comments = postObj.comments.map((comment) => {
+      postObj.comments = (postObj.comments || []).map((comment) => {
         const commentUserId = comment.user?._id?.toString();
+        
+        // CRITICAL FIX: Convert ObjectIds to strings for comparison
+        const commentUpvoteIds = (comment.upvotes || []).map(id => 
+          typeof id === 'string' ? id : id.toString()
+        );
+        const commentDownvoteIds = (comment.downvotes || []).map(id => 
+          typeof id === 'string' ? id : id.toString()
+        );
+        
         return {
           ...comment,
-          userVote: comment.upvotes.includes(userId)
+          userVote: commentUpvoteIds.includes(currentUserIdStr)
             ? "upvote"
-            : comment.downvotes.includes(userId)
+            : commentDownvoteIds.includes(currentUserIdStr)
             ? "downvote"
             : null,
           isOwner: commentUserId === currentUserIdStr,
-          replies: comment.replies.map((reply) => {
+          replies: (comment.replies || []).map((reply) => {
             const replyUserId = reply.user?._id?.toString();
+            
+            // CRITICAL FIX: Convert ObjectIds to strings for comparison
+            const replyUpvoteIds = (reply.upvotes || []).map(id => 
+              typeof id === 'string' ? id : id.toString()
+            );
+            const replyDownvoteIds = (reply.downvotes || []).map(id => 
+              typeof id === 'string' ? id : id.toString()
+            );
+            
             return {
               ...reply,
-              userVote: reply.upvotes.includes(userId)
+              userVote: replyUpvoteIds.includes(currentUserIdStr)
                 ? "upvote"
-                : reply.downvotes.includes(userId)
+                : replyDownvoteIds.includes(currentUserIdStr)
                 ? "downvote"
                 : null,
               isOwner: replyUserId === currentUserIdStr,
@@ -1377,8 +1484,6 @@ const getPersonalizedFeed = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-
-
 
 
 

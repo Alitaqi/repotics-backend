@@ -4,7 +4,7 @@ const searchLocations = async (req, res) => {
   try {
     const { q } = req.query;
     const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + " Pakistan")}&format=json&limit=5`,
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + " Pakistan")}&format=json&limit=5&accept-language=en`,
       { headers: { "Accept": "application/json" } }
     );
     const data = await response.json();
@@ -18,7 +18,7 @@ const reverseGeocode = async (req, res) => {
   try {
     const { lat, lon } = req.query;
     const response = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=en`,
       { headers: { "Accept": "application/json" } }
     );
     const data = await response.json();
@@ -32,3 +32,6 @@ module.exports = {
   searchLocations,
   reverseGeocode,
 };
+
+
+//"User-Agent": "Reportics-Location-Service/1.0" if doesnt work then add this in headers

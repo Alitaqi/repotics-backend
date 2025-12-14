@@ -145,16 +145,15 @@ const getMe = async (req, res) => {
 const getUserProfile = async (req, res) => {
   try {
     const { username } = req.params;
+    const currentUserId = req.user?.id;
 
-    const user = await User.findOne({ username })
-      .select("-password")
-      .populate("followers", "username profilePicture")
-      .populate("following", "username profilePicture");
-
+    // First, get the target user
+    const user = await User.findOne({ username }).select("-password");
+    
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const isOwner = req.user && req.user.username === username;
-    // Format dob to "day month year" (e.g., "10 May 2000")
+    const isOwner = currentUserId && user._id.equals(currentUserId);
+
     const dob = user.dob 
       ? new Date(user.dob).toLocaleDateString('en-GB', {
           day: 'numeric',
@@ -163,7 +162,38 @@ const getUserProfile = async (req, res) => {
         })
       : null;
 
+    // Fetch the current user's following list once
+    let currentUserFollowingIds = [];
+    if (currentUserId) {
+      const currentUser = await User.findById(currentUserId).select("following");
+      currentUserFollowingIds = currentUser.following.map(id => id.toString());
+    }
 
+    // Get followers with their details
+    const followers = await User.find({ _id: { $in: user.followers } })
+      .select("username profilePicture");
+    
+    // Get following with their details
+    const following = await User.find({ _id: { $in: user.following } })
+      .select("username profilePicture");
+
+    // Add isFollowing field for followers and following
+    const followersWithStatus = followers.map(f => ({
+      _id: f._id,
+      username: f.username,
+      profilePicture: f.profilePicture,
+      isFollowing: currentUserFollowingIds.includes(f._id.toString()),
+    }));
+
+    const followingWithStatus = following.map(f => ({
+      _id: f._id,
+      username: f.username,
+      profilePicture: f.profilePicture,
+      isFollowing: currentUserFollowingIds.includes(f._id.toString()),
+    }));
+  console.log("Current User ID:", currentUserId);
+console.log("Current User Following IDs:", currentUserFollowingIds);
+console.log("User followers:", user.followers);
     res.json({
       _id: user._id,
       name: user.name,
@@ -174,15 +204,17 @@ const getUserProfile = async (req, res) => {
       location: user.location || "Pakistan",
       profilePicture: user.profilePicture,
       bannerPicture: user.bannerPicture,
-      badges: user.badges || "Pakistan",
+      badges: user.badges || [],
       followersCount: user.followers.length,
       followingCount: user.following.length,
-      followers: user.followers, // populated list
-      following: user.following, // populated list
+      followers: followersWithStatus,
+      following: followingWithStatus,
       postsCount: user.postsCount,
       isOwner,
       verified: user.verified || false,
+      isFollowing: currentUserFollowingIds.includes(user._id.toString()),
     });
+
   } catch (error) {
     console.error("Get Profile Error:", error);
     res.status(500).json({ message: "Server error" });
@@ -336,21 +368,25 @@ const unfollowOtherUser = async (req, res) => {
 // 🔹 Update Profile Picture with deletion
 const updateProfilePicture = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
 
     const user = await User.findById(req.user.id);
 
-    // If old picture exists (not default), delete it
+    // Delete old image if exists
     if (user.profilePictureId) {
       await cloudinary.uploader.destroy(user.profilePictureId);
     }
 
-    // Upload new one
-    const result = await cloudinary.uploader.upload(req.file.path, {
-      folder: "profile_pictures",
-    });
-
-    fs.unlinkSync(req.file.path);
+    // ✅ Upload buffer to Cloudinary
+    const result = await cloudinary.uploader.upload(
+      `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`,
+      {
+        folder: "profile_pictures",
+        resource_type: "image",
+      }
+    );
 
     user.profilePicture = result.secure_url;
     user.profilePictureId = result.public_id;
@@ -361,16 +397,20 @@ const updateProfilePicture = async (req, res) => {
       message: "Profile picture updated successfully",
       profilePicture: user.profilePicture,
     });
+
   } catch (error) {
     console.error("Update Profile Picture Error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
 
+
 // 🔹 Update Banner Picture with deletion
 const updateBannerPicture = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
 
     const user = await User.findById(req.user.id);
 
@@ -378,11 +418,13 @@ const updateBannerPicture = async (req, res) => {
       await cloudinary.uploader.destroy(user.bannerPictureId);
     }
 
-    const result = await cloudinary.uploader.upload(req.file.path, {
-      folder: "banner_pictures",
-    });
-
-    fs.unlinkSync(req.file.path);
+    const result = await cloudinary.uploader.upload(
+      `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`,
+      {
+        folder: "banner_pictures",
+        resource_type: "image",
+      }
+    );
 
     user.bannerPicture = result.secure_url;
     user.bannerPictureId = result.public_id;
@@ -393,11 +435,13 @@ const updateBannerPicture = async (req, res) => {
       message: "Banner picture updated successfully",
       bannerPicture: user.bannerPicture,
     });
+
   } catch (error) {
     console.error("Update Banner Picture Error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
+
 
 // 🔹 Update Bio
 const updateBio = async (req, res) => {

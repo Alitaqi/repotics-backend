@@ -39,7 +39,7 @@ router.get("/", getAllPosts);
 router.get("/:postId", getPostById);
 
 // Get user posts
-router.get("/user/:username", getUserPosts);
+router.get("/user/:username",authMiddleware, getUserPosts);
 
 // Update post summary
 router.put("/:postId", authMiddleware, updatePost);
