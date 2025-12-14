@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const cloudinary = require("../utils/cloudinary");
 const fs = require("fs");
 const bcrypt = require("bcrypt");
+const Post = require("../models/Post");
 
 // Create JWT token
 const createToken = (userId) => {
@@ -126,7 +127,7 @@ const checkUsername = async (req, res) => {
   }
 };
 
-const Post = require("../models/Post");
+
 
 
 const getMe = async (req, res) => {
@@ -289,7 +290,7 @@ const unfollowUser = async (req, res) => {
     }
 
     // Debug logs with null-safe checks
-    console.log("🔎 DEBUG Unfollow Start");
+    console.log(" DEBUG Unfollow Start");
     console.log("req.user.id:", req.user.id.toString());
     console.log("targetUser._id:", targetUser._id.toString());
 
@@ -316,7 +317,7 @@ const unfollowUser = async (req, res) => {
     );
     await currentUser.save();
 
-    console.log("✅ Unfollow success");
+    console.log("Unfollow success");
 
     res.json({
       success: true,
@@ -324,7 +325,7 @@ const unfollowUser = async (req, res) => {
       followersCount: targetUser.followers.length,
     });
   } catch (error) {
-    console.error("❌ Unfollow User Error:", error);
+    console.error("Unfollow User Error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -365,7 +366,7 @@ const unfollowOtherUser = async (req, res) => {
 };
 
 
-// 🔹 Update Profile Picture with deletion
+// Update Profile Picture with deletion
 const updateProfilePicture = async (req, res) => {
   try {
     if (!req.file) {
@@ -379,7 +380,7 @@ const updateProfilePicture = async (req, res) => {
       await cloudinary.uploader.destroy(user.profilePictureId);
     }
 
-    // ✅ Upload buffer to Cloudinary
+    // Upload buffer to Cloudinary
     const result = await cloudinary.uploader.upload(
       `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`,
       {
@@ -405,7 +406,7 @@ const updateProfilePicture = async (req, res) => {
 };
 
 
-// 🔹 Update Banner Picture with deletion
+// Update Banner Picture with deletion
 const updateBannerPicture = async (req, res) => {
   try {
     if (!req.file) {
@@ -443,7 +444,7 @@ const updateBannerPicture = async (req, res) => {
 };
 
 
-// 🔹 Update Bio
+// Update Bio
 const updateBio = async (req, res) => {
   try {
     const { bio } = req.body;
@@ -495,7 +496,7 @@ const updateName = async (req, res) => {
 };
 
 
-// ✅ Update Location
+//  Update Location
 const updateLocation = async (req, res) => {
   try {
     const { location, coordinates } = req.body;
@@ -518,7 +519,7 @@ const updateLocation = async (req, res) => {
 };
 
 
-// ✅ Update Password
+//  Update Password
 const updatePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;

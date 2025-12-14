@@ -73,7 +73,7 @@ async function urlToBase64(url) {
 // /posts/:postId/approve-summary
 
 
-// 🔹 Create a post with proper error handling
+// Create a post with proper error handling
 const createPost = async (req, res) => {
   // Set longer timeout for file processing
   req.setTimeout(60000); // 60 seconds
@@ -243,9 +243,9 @@ const finalizeReport = async (req, res) => {
     post.aiReport.status = "processing_full_report";
     await post.save();
 
-    // ----------------------------------------------------------
+    
     // STEP 1 — Convert Cloudinary Images → Base64
-    // ----------------------------------------------------------
+    
     const imageInputs = [];
     for (const url of post.images) {
       const dataUrl = await urlToBase64(url);
@@ -257,9 +257,9 @@ const finalizeReport = async (req, res) => {
       }
     }
 
-    // ----------------------------------------------------------
+    
     // STEP 2 — Build prompt for AI (image + text)
-    // ----------------------------------------------------------
+    
     const messages = [
       {
         role: "system",
@@ -565,8 +565,8 @@ const downvotePost = async (req, res) => {
 ///////
 
 
-// 🔹 Get all posts (feed) ////////later add algorithm of posts
-// 🔹 Update getPostById to include ownership info
+//  Get all posts (feed) ////////later add algorithm of posts
+//  Update getPostById to include ownership info
 // const getPostById = async (req, res) => {
 //   try {
 //     const currentUserId = req.user?.id;
@@ -656,7 +656,7 @@ const getPostById = async (req, res) => {
   }
 };
 
-// 🔹 Update getAllPosts to include ownership info
+// Update getAllPosts to include ownership info
 const getAllPosts = async (req, res) => {
   try {
     const currentUserId = req.user?.id;
@@ -685,7 +685,7 @@ const getAllPosts = async (req, res) => {
   }
 };
 
-// 🔹 Update post summary only
+// Update post summary only
 const updatePost = async (req, res) => {
   try {
     const { postId } = req.params;
@@ -708,7 +708,7 @@ const updatePost = async (req, res) => {
   }
 };
 
-// 🔹 Delete a post (with Cloudinary images cleanup)
+// Delete a post (with Cloudinary images cleanup)
 const deletePost = async (req, res) => {
   try {
     const { postId } = req.params;
@@ -736,7 +736,7 @@ const deletePost = async (req, res) => {
   }
 };
 
-// 🔹 Add comment to post
+// Add comment to post
 const addComment = async (req, res) => {
   try {
     const { postId } = req.params;
@@ -774,7 +774,7 @@ const addComment = async (req, res) => {
   }
 };
 
-// 🔹 Add reply to comment
+// Add reply to comment
 const addReply = async (req, res) => {
   try {
     const { postId, commentId } = req.params;
@@ -814,7 +814,7 @@ const addReply = async (req, res) => {
   }
 };
 
-// 🔹 Upvote/Downvote comment
+// Upvote/Downvote comment
 const voteComment = async (req, res) => {
   try {
     const { postId, commentId } = req.params;
@@ -868,7 +868,7 @@ const voteComment = async (req, res) => {
   }
 };
 
-// 🔹 Upvote/Downvote reply
+// Upvote/Downvote reply
 const voteReply = async (req, res) => {
   try {
     const { postId, commentId, replyId } = req.params;
@@ -925,7 +925,7 @@ const voteReply = async (req, res) => {
   }
 };
 
-// 🔹 Delete comment (only by comment owner or post owner)
+// Delete comment (only by comment owner or post owner)
 const deleteComment = async (req, res) => {
   try {
     const { postId, commentId } = req.params;
@@ -968,7 +968,7 @@ const deleteReply = async (req, res) => {
   try {
     const { postId, commentId, replyId } = req.params;
 
-    // ✅ Always normalize userId to string
+    
     const userId = req.user?._id?.toString() || req.user?.id?.toString();
 
     const post = await Post.findById(postId);
@@ -980,7 +980,7 @@ const deleteReply = async (req, res) => {
     const reply = comment.replies.id(replyId);
     if (!reply) return res.status(404).json({ message: "Reply not found" });
 
-    // ✅ Normalize reply.user to string
+    
     const replyUserId =
       reply.user?._id?.toString() || reply.user?.toString();
 
@@ -989,7 +989,7 @@ const deleteReply = async (req, res) => {
     console.log("Reply ownerId:", replyUserId);
 
     if (replyUserId !== userId) {
-      console.log("❌ Unauthorized: IDs don't match");
+      console.log(" Unauthorized: IDs don't match");
       return res.status(403).json({ message: "Unauthorized" });
     }
 
@@ -1337,17 +1337,17 @@ const getPersonalizedFeed = async (req, res) => {
     const userId = req.user.id;
     const { cursor, limit = 10 } = req.query;
 
-    // 1️⃣ Get current user
+    // 1️ Get current user
     const currentUser = await User.findById(userId).select("following location coordinates");
     if (!currentUser) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // 2️⃣ Base query
+    // 2️ Base query
     const query = {};
     if (cursor) query.createdAt = { $lt: new Date(cursor) };
 
-    // 3️⃣ Fetch posts
+    // 3️ Fetch posts
     const posts = await Post.find(query)
       .populate("user", "username name profilePicture location coordinates verified")
       .populate("comments.user", "name username profilePicture verified")
@@ -1355,7 +1355,7 @@ const getPersonalizedFeed = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(Number(limit) + 1);
 
-    // 4️⃣ Scoring logic
+    // 4️ Scoring logic
     const scoredPosts = posts.map((post) => {
       let score = 0;
 
@@ -1408,10 +1408,10 @@ const getPersonalizedFeed = async (req, res) => {
       return { post, score };
     });
 
-    // 5️⃣ Sort by score (descending)
+    // 5️ Sort by score (descending)
     scoredPosts.sort((a, b) => b.score - a.score);
 
-    // 6️⃣ Format posts for frontend
+    // 6️ Format posts for frontend
     const feed = scoredPosts.slice(0, limit).map(({ post, score }) => {
       const postObj = post.toObject();
       const currentUserIdStr = userId.toString();
@@ -1471,7 +1471,7 @@ const getPersonalizedFeed = async (req, res) => {
       return postObj;
     });
 
-    // 7️⃣ Pagination
+    // 7️ Pagination
     const nextCursor = posts.length > limit ? posts[limit - 1].createdAt : null;
 
     res.json({

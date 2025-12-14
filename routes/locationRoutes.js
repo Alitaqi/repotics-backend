@@ -7,4 +7,4 @@ const router = express.Router();
 router.get("/search", searchLocations);
 router.get("/reverse", reverseGeocode);
 
-module.exports = router;   // 👈 this is CRUCIAL
+module.exports = router;  

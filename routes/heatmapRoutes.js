@@ -13,6 +13,7 @@ router.get("/heatmap", getCrimeHeatmapData);
 router.get("/city-stats", getCityWiseCrimeStats);
 router.get("/crime-type-distribution", getCrimeTypeDistribution);
 router.get("/crime-trend", getCrimeTrendStats);
+
 // Combined endpoint for all reports
 router.get("/all-reports", getAllReports);
 

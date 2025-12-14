@@ -59,13 +59,13 @@ router.put(
   updateBannerPicture
 );
 
-// 🔹 Update Name (protected)
+// Update Name (protected)
 router.put("/profile/update-name", authMiddleware, updateName);
 
-// 🔹 Update Location (protected)
+// Update Location (protected)
 router.put("/profile/update-location", authMiddleware, updateLocation);
 
-// 🔹 Update Password (protected)
+// Update Password (protected)
 router.put("/profile/update-password", authMiddleware, updatePassword);
 router.put("/profile/update-bio", authMiddleware, updateBio);
 

@@ -50,7 +50,7 @@ const commentSchema = new mongoose.Schema({
 });
 
 
-// 🔥 AI Analysis Schema (forensics + summary + extracted data)
+// AI Analysis Schema (forensics + summary + extracted data)
 const aiReportSchema = new mongoose.Schema({
   status: {
     type: String,
@@ -86,10 +86,10 @@ const aiReportSchema = new mongoose.Schema({
 
 const postSchema = new mongoose.Schema(
   {
-    // 🔹 User & Create Info
+    // User & Create Info
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 
-    // 🔹 Public Post Data
+    // Public Post Data
     description: { type: String }, 
     images: [{ type: String }],
     tags: [{ type: String }],
@@ -97,7 +97,7 @@ const postSchema = new mongoose.Schema(
     likes: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     comments: [commentSchema],
 
-    // 🔹 Raw user-submitted crime report fields
+    // Raw user-submitted crime report fields
     incidentDescription: { type: String },
     crimeType: { type: String, required: true },
     date: { type: String, required: true },
@@ -113,7 +113,7 @@ const postSchema = new mongoose.Schema(
     upvotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     downvotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 
-    // 🔥 NEW: attach the AI report object
+    // attach the AI report object
     aiReport: aiReportSchema,
   },
   { timestamps: true }
