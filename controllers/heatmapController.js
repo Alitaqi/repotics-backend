@@ -4,7 +4,7 @@ const getCrimeHeatmapData = async (req, res) => {
   try {
     const { city, type, startDate, endDate } = req.query;
 
-    // 🔍 Build dynamic filters
+    //  Build dynamic filters
     const query = {};
     if (city) query["locationText"] = { $regex: city, $options: "i" };
     if (type) query["crimeType"] = { $regex: type, $options: "i" };
@@ -14,19 +14,19 @@ const getCrimeHeatmapData = async (req, res) => {
       if (endDate) query["createdAt"].$lte = new Date(endDate);
     }
 
-    // 🔍 Fetch matching posts
+    //  Fetch matching posts
     const crimes = await Post.find(query).select(
       "_id coordinates crimeType createdAt locationText"
     );
 
-    // 🧩 Convert to GeoJSON format for Mapbox
+    //  Convert to GeoJSON format for Mapbox
     const features = crimes
       .filter((c) => c.coordinates && c.coordinates.lat && c.coordinates.lng)
       .map((c) => ({
         type: "Feature",
         geometry: {
           type: "Point",
-          coordinates: [c.coordinates.lng, c.coordinates.lat], // ✅ Mapbox expects [lng, lat]
+          coordinates: [c.coordinates.lng, c.coordinates.lat], 
         },
         properties: {
           _id: c._id.toString(),

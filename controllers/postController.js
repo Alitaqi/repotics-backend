@@ -237,7 +237,7 @@ const finalizeReport = async (req, res) => {
     // If user edited the short summary
     if (description) {
       post.aiReport.shortSummary = description;
-      post.description = description; // <-- updated here
+      post.description = description; 
     }
 
     post.aiReport.status = "processing_full_report";
@@ -318,9 +318,8 @@ Coordinates: ${post.coordinates?.lat}, ${post.coordinates?.lng}
       },
     ];
 
-    // ----------------------------------------------------------
+    
     // STEP 3 — Generate full report using OpenAI Vision
-    // ----------------------------------------------------------
     let fullTextOutput = "";
     try {
       const aiRes = await client.chat.completions.create({
@@ -336,9 +335,8 @@ Coordinates: ${post.coordinates?.lat}, ${post.coordinates?.lng}
       fullTextOutput = "AI could not generate full report.";
     }
 
-    // ----------------------------------------------------------
+    
     // STEP 4 — Extract JSON + Narrative
-    // ----------------------------------------------------------
     let extractedJSON = null;
     let narrativeReport = fullTextOutput;
 
@@ -353,9 +351,8 @@ Coordinates: ${post.coordinates?.lat}, ${post.coordinates?.lng}
       }
     }
 
-    // ----------------------------------------------------------
+    
     // STEP 5 — Save to MongoDB in correct schema fields
-    // ----------------------------------------------------------
     if (extractedJSON) {
       post.aiReport.extracted.weapons =
         extractedJSON.weapons || [];
