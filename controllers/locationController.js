@@ -5,7 +5,9 @@ const searchLocations = async (req, res) => {
     const { q } = req.query;
     const response = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + " Pakistan")}&format=json&limit=5&accept-language=en`,
-      { headers: { "Accept": "application/json" } }
+      { headers: { "Accept": "application/json",
+        "User-Agent": "Repotics-Location-Service/1.0" 
+       } }
     );
     const data = await response.json();
     res.json(data);
@@ -19,7 +21,7 @@ const reverseGeocode = async (req, res) => {
     const { lat, lon } = req.query;
     const response = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=en`,
-      { headers: { "Accept": "application/json" } }
+      { headers: { "Accept": "application/json", "User-Agent": "Repotics-Location-Service/1.0" } }
     );
     const data = await response.json();
     res.json(data);
