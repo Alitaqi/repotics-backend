@@ -18,6 +18,8 @@ const {
   deleteComment,
   deleteReply,
   getPersonalizedFeed,
+  searchPosts,
+  getTrendingCrimes,
   // toggleLike,
   // addComment,
 } = require("../controllers/postController");
@@ -67,5 +69,11 @@ router.delete("/:postId/comments/:commentId", authMiddleware, deleteComment);
 router.delete("/:postId/comments/:commentId/replies/:replyId", authMiddleware, deleteReply);
 
 
+
+//search
+router.get("/searchbar/search", authMiddleware, searchPosts);
+
+//trednign crime
+router.get("/trending/trending-crimes", getTrendingCrimes);
 
 module.exports = router;

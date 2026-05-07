@@ -6,6 +6,7 @@ const fs = require("fs");
 const mongoose = require("mongoose");
 const haversine = require("haversine-distance");
 const MissingPerson = require("../models/MissingPerson");
+const Notification = require("../models/Notifications");
 const multer = require('multer');
 
 
@@ -465,9 +466,7 @@ exports.addComment = async (req, res) => {
     }
 
     const missingPerson = await MissingPerson.findById(id);
-    if (!missingPerson) {
-      return res.status(404).json({ message: "Missing person not found" });
-    }
+    if (!missingPerson) return res.status(404).json({ message: "Missing person not found" });
 
     const newComment = {
       user: req.user.id,
@@ -480,11 +479,21 @@ exports.addComment = async (req, res) => {
     missingPerson.comments.push(newComment);
     await missingPerson.save();
 
-    // Populate the new comment with user data
+    const reportedById = missingPerson.reportedBy;
+
+    if (reportedById.toString() !== req.user.id.toString()) {
+      await Notification.create({
+        recipient: reportedById,
+        sender: req.user.id,
+        type: "comment",
+        message: `${req.user.username} commented on your missing person report`,
+        post: missingPerson._id,
+      });
+    }
+
     await missingPerson.populate('comments.user', 'name username profilePicture verified');
-    
     const addedComment = missingPerson.comments[missingPerson.comments.length - 1];
-    
+
     res.status(201).json({
       success: true,
       message: "Comment added successfully",
@@ -507,14 +516,10 @@ exports.addReply = async (req, res) => {
     }
 
     const missingPerson = await MissingPerson.findById(id);
-    if (!missingPerson) {
-      return res.status(404).json({ message: "Missing person not found" });
-    }
+    if (!missingPerson) return res.status(404).json({ message: "Missing person not found" });
 
     const comment = missingPerson.comments.id(commentId);
-    if (!comment) {
-      return res.status(404).json({ message: "Comment not found" });
-    }
+    if (!comment) return res.status(404).json({ message: "Comment not found" });
 
     const newReply = {
       user: req.user.id,
@@ -526,11 +531,21 @@ exports.addReply = async (req, res) => {
     comment.replies.push(newReply);
     await missingPerson.save();
 
-    // Populate the reply with user data
+    const commentOwnerId = comment.user;
+
+    if (commentOwnerId.toString() !== req.user.id.toString()) {
+      await Notification.create({
+        recipient: commentOwnerId,
+        sender: req.user.id,
+        type: "comment",
+        message: `${req.user.username} replied to your comment on a missing person report`,
+        post: missingPerson._id,
+      });
+    }
+
     await missingPerson.populate('comments.replies.user', 'name username profilePicture verified');
-    
     const addedReply = comment.replies[comment.replies.length - 1];
-    
+
     res.status(201).json({
       success: true,
       message: "Reply added successfully",
@@ -757,91 +772,99 @@ exports.deleteReply = async (req, res) => {
 exports.upvoteMissingPerson = async (req, res) => {
   try {
     const missingPerson = await MissingPerson.findById(req.params.id);
+    if (!missingPerson) return res.status(404).json({ success: false, message: 'Missing person not found' });
 
-    if (!missingPerson) {
-      return res.status(404).json({
-        success: false,
-        message: 'Missing person not found'
-      });
-    }
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const reportedById = missingPerson.reportedBy;
 
-    const userId = req.user.id;
-
-    const alreadyUpvoted = missingPerson.upvotes.some(
-      upvote => upvote.toString() === userId.toString()
-    );
+    const alreadyUpvoted = missingPerson.upvotes.some(id => id.equals(userId));
+    const alreadyDownvoted = missingPerson.downvotes.some(id => id.equals(userId));
 
     if (alreadyUpvoted) {
-      missingPerson.upvotes = missingPerson.upvotes.filter(
-        upvote => upvote.toString() !== userId.toString()
-      );
+      missingPerson.upvotes.pull(userId);
     } else {
       missingPerson.upvotes.push(userId);
-      missingPerson.downvotes = missingPerson.downvotes.filter(
-        downvote => downvote.toString() !== userId.toString()
-      );
+      if (alreadyDownvoted) missingPerson.downvotes.pull(userId);
     }
 
     await missingPerson.save();
+
+    // Notify reporter if not self-upvote and not removing upvote
+    if (reportedById.toString() !== userId.toString() && !alreadyUpvoted) {
+      await Notification.create({
+        recipient: reportedById,
+        sender: userId,
+        type: "upvote",
+        message: `${req.user.username} upvoted your missing person report`,
+        post: missingPerson._id,
+      });
+    }
+
+    const userVote = missingPerson.upvotes.some(id => id.equals(userId))
+      ? "upvote"
+      : missingPerson.downvotes.some(id => id.equals(userId))
+      ? "downvote"
+      : null;
 
     res.status(200).json({
       success: true,
       message: alreadyUpvoted ? 'Upvote removed' : 'Upvoted successfully',
       upvotes: missingPerson.upvotes.length,
-      downvotes: missingPerson.downvotes.length
+      downvotes: missingPerson.downvotes.length,
+      userVote
     });
   } catch (error) {
     console.error('Upvote error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };
 
 exports.downvoteMissingPerson = async (req, res) => {
   try {
     const missingPerson = await MissingPerson.findById(req.params.id);
+    if (!missingPerson) return res.status(404).json({ success: false, message: 'Missing person not found' });
 
-    if (!missingPerson) {
-      return res.status(404).json({
-        success: false,
-        message: 'Missing person not found'
-      });
-    }
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const reportedById = missingPerson.reportedBy;
 
-    const userId = req.user.id;
-
-    const alreadyDownvoted = missingPerson.downvotes.some(
-      downvote => downvote.toString() === userId.toString()
-    );
+    const alreadyDownvoted = missingPerson.downvotes.some(id => id.equals(userId));
+    const alreadyUpvoted = missingPerson.upvotes.some(id => id.equals(userId));
 
     if (alreadyDownvoted) {
-      missingPerson.downvotes = missingPerson.downvotes.filter(
-        downvote => downvote.toString() !== userId.toString()
-      );
+      missingPerson.downvotes.pull(userId);
     } else {
       missingPerson.downvotes.push(userId);
-      missingPerson.upvotes = missingPerson.upvotes.filter(
-        upvote => upvote.toString() !== userId.toString()
-      );
+      if (alreadyUpvoted) missingPerson.upvotes.pull(userId);
     }
 
     await missingPerson.save();
+
+    // Notify reporter if not self-downvote and not removing downvote
+    if (reportedById.toString() !== userId.toString() && !alreadyDownvoted) {
+      await Notification.create({
+        recipient: reportedById,
+        sender: userId,
+        type: "downvote",
+        message: `${req.user.username} downvoted your missing person report`,
+        post: missingPerson._id,
+      });
+    }
+
+    const userVote = missingPerson.upvotes.some(id => id.equals(userId))
+      ? "upvote"
+      : missingPerson.downvotes.some(id => id.equals(userId))
+      ? "downvote"
+      : null;
 
     res.status(200).json({
       success: true,
       message: alreadyDownvoted ? 'Downvote removed' : 'Downvoted successfully',
       upvotes: missingPerson.upvotes.length,
-      downvotes: missingPerson.downvotes.length
+      downvotes: missingPerson.downvotes.length,
+      userVote
     });
   } catch (error) {
     console.error('Downvote error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };

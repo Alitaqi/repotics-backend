@@ -9,9 +9,15 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   dob: { type: Date, required: true }, 
   location: { type: String }, // e.g. "F-8, Islamabad"
-  coordinates: {
-    lat: { type: Number },
-    lng: { type: Number }
+  locationGeo: {
+    type: {
+      type: String,
+      enum: ["Point"],
+      default: "Point"
+    },
+    coordinates: {
+      type: [Number], // [lng, lat]
+    }
   },
   bio: { type: String, default: "" },
   profilePicture: { type: String, default: "https://res.cloudinary.com/dd7mk4do3/image/upload/v1755870214/aa_pkajlu.jpg" },
@@ -24,9 +30,14 @@ const userSchema = new mongoose.Schema({
   following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   // metadata
   postsCount: { type: Number, default: 0 },
+  stats: {
+  totalComments: { type: Number, default: 0 },
+  totalReplies: { type: Number, default: 0 },
+  totalUpvotesReceived: { type: Number, default: 0 },
+  totalDownvotesReceived: { type: Number, default: 0 },
+},
   verified: { type: Boolean, default: false },
 }, { timestamps: true });
-
 
 
 // Password hashing before saving
@@ -41,6 +52,8 @@ userSchema.pre("save", async function (next) {
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
+
+userSchema.index({ locationGeo: "2dsphere" });
 
 const User = mongoose.model("User", userSchema);
 module.exports = User;

@@ -6,6 +6,9 @@ const postRoutes = require("./routes/postRoutes");
 const locationRoutes = require("./routes/locationRoutes.js");
 const heatmapRoutes = require("./routes/heatmapRoutes");
 const missingPersonRoutes = require("./routes/missingPersonRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
+const verificationRoutes = require("./routes/verificationRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 const dotenv = require("dotenv");
 
 const app = express();
@@ -28,6 +31,9 @@ app.use("/api/posts", postRoutes);
 app.use("/api/location", locationRoutes);
 app.use("/api/crimes", heatmapRoutes);
 app.use("/api/missing-persons", missingPersonRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/verification", verificationRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // Error handling
 app.use((err, req, res, next) => {

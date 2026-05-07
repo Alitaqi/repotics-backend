@@ -1,6 +1,7 @@
 const Post = require("../models/Post");
 const cloudinary = require("../utils/cloudinary");
 const User = require("../models/User");
+const Notification = require("../models/Notifications");
 const streamifier = require("streamifier");
 const path = require("path");
 const fs = require("fs");
@@ -9,6 +10,8 @@ const haversine = require("haversine-distance");
 const OpenAI = require("openai");
 const axios = require("axios");
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const { calculateBadges } = require("../utils/badgeEngine");
+const { sendCrimeAlertEmail } = require("../utils/sendEmail");
 
 
 
@@ -72,6 +75,23 @@ async function urlToBase64(url) {
 // User approves or eidts sumary -> trigger heavy AI Job
 // /posts/:postId/approve-summary
 
+
+//helper to find near by user of the post location
+const findNearbyUsers = async (lng, lat) => {
+  const radiusInMeters = 5000; // 5km
+
+  return await User.find({
+    locationGeo: {
+      $near: {
+        $geometry: {
+          type: "Point",
+          coordinates: [lng, lat],
+        },
+        $maxDistance: radiusInMeters,
+      },
+    },
+  }).select("email name");
+};
 
 // Create a post with proper error handling
 const createPost = async (req, res) => {
@@ -144,7 +164,10 @@ const createPost = async (req, res) => {
       date,
       time,
       locationText,
-      coordinates: { lat, lng },
+      locationGeo: {
+        type: "Point",
+        coordinates: [parseFloat(lng), parseFloat(lat)],
+      },
       anonymous: anonymous === "true",
       agreed: agreed === "true",
       images: uploadedImages,
@@ -158,6 +181,24 @@ const createPost = async (req, res) => {
     });
 
     console.log('Post created successfully with ID:', post._id);
+
+    try {
+      const nearbyUsers = await findNearbyUsers(
+        parseFloat(lng),
+        parseFloat(lat)
+      );
+
+      console.log(`Found ${nearbyUsers.length} nearby users`);
+
+      for (const user of nearbyUsers) {
+        // avoid sending to self
+        if (user._id.toString() === req.user.id.toString()) continue;
+
+        await sendCrimeAlertEmail(user.email, post);
+      }
+    } catch (emailError) {
+      console.error("Error sending alert emails:", emailError);
+    }
     
     // Clean up temporary files if using disk storage
     if (req.files?.length > 0) {
@@ -205,7 +246,15 @@ Image URLs: ${uploadedImages.join("\n")}
     post.aiReport.status = "awaiting_user_approval";
     await post.save();
 
-    await User.findByIdAndUpdate(req.user.id, { $inc: { postsCount: 1 } });
+    // await User.findByIdAndUpdate(req.user.id, { $inc: { postsCount: 1 } }):
+    const user = await User.findById(req.user.id);
+
+    user.postsCount += 1;
+
+      // recalc badges
+    user.badges = calculateBadges(user);
+
+    await user.save();
 
     return res.status(201).json({
       message: "Post created. AI summary ready for approval.",
@@ -480,6 +529,8 @@ Coordinates: ${post.coordinates?.lat}, ${post.coordinates?.lng}
 
 
 // 🔹 Add voting functionality
+
+
 const upvotePost = async (req, res) => {
   try {
     const { postId } = req.params;
@@ -488,19 +539,52 @@ const upvotePost = async (req, res) => {
     const post = await Post.findById(postId);
     if (!post) return res.status(404).json({ message: "Post not found" });
 
+    const postOwnerId = post.user;
+
     const alreadyUpvoted = post.upvotes.some(id => id.equals(userId));
     const alreadyDownvoted = post.downvotes.some(id => id.equals(userId));
 
+    let upvoteChange = 0;
+    let downvoteChange = 0;
+
     if (alreadyUpvoted) {
       post.upvotes.pull(userId);
+      upvoteChange = -1;
     } else {
       post.upvotes.push(userId);
-      if (alreadyDownvoted) post.downvotes.pull(userId);
+      upvoteChange = 1;
+
+      if (alreadyDownvoted) {
+        post.downvotes.pull(userId);
+        downvoteChange = -1;
+      }
     }
 
     await post.save();
 
-    // Recompute userVote after saving
+    if (postOwnerId.toString() !== userId.toString() && !alreadyUpvoted) {
+      await Notification.create({
+        recipient: postOwnerId,
+        sender: userId,
+        type: "upvote",
+        message: `${req.user.username} upvoted your post`,
+        post: post._id,
+      });
+    }
+
+    // 🔥 UPDATE POST OWNER STATS
+    const owner = await User.findById(postOwnerId);
+
+    if (owner) {
+      owner.totalUpvotesReceived += upvoteChange;
+      owner.totalDownvotesReceived += downvoteChange;
+
+      // recalc badges
+      owner.badges = calculateBadges(owner);
+
+      await owner.save();
+    }
+
     const userVote = post.upvotes.some(id => id.equals(userId))
       ? "upvote"
       : post.downvotes.some(id => id.equals(userId))
@@ -513,6 +597,7 @@ const upvotePost = async (req, res) => {
       downvotes: post.downvotes.length,
       userVote
     });
+
   } catch (error) {
     console.error("Upvote Error:", error);
     res.status(500).json({ message: "Server error" });
@@ -527,17 +612,50 @@ const downvotePost = async (req, res) => {
     const post = await Post.findById(postId);
     if (!post) return res.status(404).json({ message: "Post not found" });
 
+    const postOwnerId = post.user;
+
     const alreadyDownvoted = post.downvotes.some(id => id.equals(userId));
     const alreadyUpvoted = post.upvotes.some(id => id.equals(userId));
 
+    let downvoteChange = 0;
+    let upvoteChange = 0;
+
     if (alreadyDownvoted) {
       post.downvotes.pull(userId);
+      downvoteChange = -1;
     } else {
       post.downvotes.push(userId);
-      if (alreadyUpvoted) post.upvotes.pull(userId);
+      downvoteChange = 1;
+
+      if (alreadyUpvoted) {
+        post.upvotes.pull(userId);
+        upvoteChange = -1;
+      }
     }
 
     await post.save();
+
+    if (postOwnerId.toString() !== userId.toString() && !alreadyUpvoted) {
+      await Notification.create({
+        recipient: postOwnerId,
+        sender: userId,
+        type: "upvote",
+        message: `${req.user.username} upvoted your post`,
+        post: post._id,
+      });
+    }
+
+    // 🔥 UPDATE POST OWNER STATS
+    const owner = await User.findById(postOwnerId);
+
+    if (owner) {
+      owner.totalDownvotesReceived += downvoteChange;
+      owner.totalUpvotesReceived += upvoteChange;
+
+      owner.badges = calculateBadges(owner);
+
+      await owner.save();
+    }
 
     const userVote = post.upvotes.some(id => id.equals(userId))
       ? "upvote"
@@ -551,6 +669,7 @@ const downvotePost = async (req, res) => {
       downvotes: post.downvotes.length,
       userVote
     });
+
   } catch (error) {
     console.error("Downvote Error:", error);
     res.status(500).json({ message: "Server error" });
@@ -757,10 +876,30 @@ const addComment = async (req, res) => {
     post.comments.push(newComment);
     await post.save();
 
+    const postOwnerId = post.user;
+
+    if (postOwnerId.toString() !== req.user.id.toString()) {
+      await Notification.create({
+        recipient: postOwnerId,
+        sender: req.user.id,
+        type: "comment",
+        message: `${req.user.username} commented on your post`,
+        post: post._id,
+      });
+    }
     // Populate the new comment with user data
     await post.populate('comments.user', 'name username profilePicture verified');
     
     const addedComment = post.comments[post.comments.length - 1];
+
+    const user = await User.findById(req.user.id);
+
+    user.stats.totalComments += 1;
+
+    user.badges = calculateBadges(user);
+
+    await user.save();
+
     res.status(201).json({
       message: "Comment added successfully",
       comment: addedComment
@@ -797,10 +936,30 @@ const addReply = async (req, res) => {
     comment.replies.push(newReply);
     await post.save();
 
+    const commentOwnerId = comment.user;
+
+    if (commentOwnerId.toString() !== req.user.id.toString()) {
+      await Notification.create({
+        recipient: commentOwnerId,
+        sender: req.user.id,
+        type: "comment",
+        message: `${user.username} replied to your comment`,
+        post: post._id,
+      });
+    }
     // Populate the reply with user data
     await post.populate('comments.replies.user', 'name username profilePicture verified');
     
     const addedReply = comment.replies[comment.replies.length - 1];
+
+    const user = await User.findById(req.user.id);
+
+    user.stats.totalReplies += 1;
+
+    user.badges = calculateBadges(user);
+
+    await user.save();
+
     res.status(201).json({
       message: "Reply added successfully",
       reply: addedReply
@@ -1483,6 +1642,148 @@ const getPersonalizedFeed = async (req, res) => {
 };
 
 
+const searchPosts = async (req, res) => {
+  try {
+    const { q, includePosts = "true", includeUsers = "true", page = 1, limit = 10 } = req.query;
+
+    if (!q || !q.trim()) {
+      return res.status(400).json({ success: false, message: "Query is required" });
+    }
+
+    const skip = (Number(page) - 1) * Number(limit);
+    const results = { posts: [], users: [], total: 0 };
+
+    // Search posts by description or incidentDescription
+    if (includePosts === "true") {
+      const postFilter = {
+        $or: [
+          { description: { $regex: q, $options: "i" } },
+          { incidentDescription: { $regex: q, $options: "i" } },
+          { crimeType: { $regex: q, $options: "i" } },
+          { locationText: { $regex: q, $options: "i" } },
+        ],
+      };
+
+      const [posts, postCount] = await Promise.all([
+        Post.find(postFilter)
+          .populate("user", "name username profilePicture verified")
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(Number(limit))
+          .lean(),
+        Post.countDocuments(postFilter),
+      ]);
+
+      results.posts = posts.map((post) => ({
+        ...post,
+        user: post.anonymous
+          ? { name: "Anonymous User", username: "anonymous", profilePicture: null }
+          : post.user,
+      }));
+      results.postTotal = postCount;
+    }
+
+    // Search users by name or username
+    if (includeUsers === "true") {
+      const User = require("../models/User");
+      const userFilter = {
+        $or: [
+          { name: { $regex: q, $options: "i" } },
+          { username: { $regex: q, $options: "i" } },
+        ],
+      };
+
+      const [users, userCount] = await Promise.all([
+        User.find(userFilter)
+          .select("name username profilePicture verified bio")
+          .skip(skip)
+          .limit(Number(limit))
+          .lean(),
+        User.countDocuments(userFilter),
+      ]);
+
+      results.users = users;
+      results.userTotal = userCount;
+    }
+
+    results.total = (results.postTotal || 0) + (results.userTotal || 0);
+
+    res.status(200).json({ success: true, ...results, page: Number(page), limit: Number(limit) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getTrendingCrimes = async (req, res) => {
+  try {
+    const posts = await Post.aggregate([
+      {
+        $addFields: {
+          upvoteCount: { $size: "$upvotes" },
+          downvoteCount: { $size: "$downvotes" },
+          commentCount: { $size: "$comments" },
+        },
+      },
+      {
+        $addFields: {
+          score: {
+            $subtract: [
+              {
+                $add: [
+                  "$upvoteCount",
+                  { $multiply: ["$commentCount", 2] },
+                ],
+              },
+              "$downvoteCount",
+            ],
+          },
+        },
+      },
+      { $sort: { score: -1 } },
+      { $limit: 5 },
+      {
+        $project: {
+          _id: 1,
+          crimeType: 1,
+          incidentDescription: 1,
+          score: 1,
+
+          shortLocation: {
+            $let: {
+              vars: {
+                parts: { $split: ["$locationText", ","] }
+              },
+              in: {
+                $concat: [
+                  { $trim: { input: { $arrayElemAt: ["$$parts", 0] } } },
+                  ", ",
+                  {
+                    $trim: {
+                      input: {
+                        $arrayElemAt: ["$$parts", 1]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: posts,
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 
 
@@ -1503,6 +1804,8 @@ module.exports = {
   deleteComment,
   deleteReply,
   getPersonalizedFeed,
+  searchPosts,
+  getTrendingCrimes,
   // toggleLike,
   // addComment,
 };

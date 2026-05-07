@@ -1,4 +1,145 @@
 const Post = require("../models/Post");
+const OpenAI = require("openai");
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const getPatrolInsights = async (req, res) => {
+  try {
+    // const { startDate, endDate, city, type } = req.query;
+
+    // Build date filter
+    const now = new Date();
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+
+    const dateFilter = {
+      createdAt: { $gte: threeMonthsAgo, $lte: now },
+    };
+
+    // if (city) dateFilter.locationText = { $regex: city, $options: "i" };
+    // if (type) dateFilter.crimeType = { $regex: type, $options: "i" };
+
+    // --- Aggregation 1: Crime type breakdown ---
+    const crimeTypeStats = await Post.aggregate([
+      { $match: dateFilter },
+      { $group: { _id: "$crimeType", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 8 },
+    ]);
+
+    // --- Aggregation 2: Top locations ---
+    const locationStats = await Post.aggregate([
+      { $match: dateFilter },
+      { $group: { _id: "$locationText", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 5 },
+    ]);
+
+    // --- Aggregation 3: Time of day breakdown ---
+    const hourStats = await Post.aggregate([
+      { $match: dateFilter },
+      {
+        $group: {
+          _id: { $hour: "$createdAt" },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { "_id": 1 } },
+    ]);
+
+    // Map hours to time slots
+    const timeSlots = {
+      "12am-4am": 0, "4am-8am": 0, "8am-12pm": 0,
+      "12pm-4pm": 0, "4pm-8pm": 0, "8pm-12am": 0,
+    };
+    hourStats.forEach(({ _id: hour, count }) => {
+      if (hour < 4) timeSlots["12am-4am"] += count;
+      else if (hour < 8) timeSlots["4am-8am"] += count;
+      else if (hour < 12) timeSlots["8am-12pm"] += count;
+      else if (hour < 16) timeSlots["12pm-4pm"] += count;
+      else if (hour < 20) timeSlots["4pm-8pm"] += count;
+      else timeSlots["8pm-12am"] += count;
+    });
+
+    // --- Aggregation 4: Monthly trend ---
+    const monthlyTrend = await Post.aggregate([
+      { $match: dateFilter },
+      {
+        $group: {
+          _id: { year: { $year: "$createdAt" }, month: { $month: "$createdAt" } },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { "_id.year": 1, "_id.month": 1 } },
+    ]);
+
+    const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const trendFormatted = monthlyTrend.map((m) => ({
+      month: `${monthNames[m._id.month - 1]} ${m._id.year}`,
+      count: m.count,
+    }));
+
+    const totalCrimes = crimeTypeStats.reduce((a, b) => a + b.count, 0);
+
+    // --- Build structured data for GPT ---
+    const structuredData = {
+      totalCrimes,
+      timeRange: {
+        from: dateFilter.createdAt.$gte.toDateString(),
+        to: dateFilter.createdAt.$lte.toDateString(),
+      },
+      topCrimeTypes: crimeTypeStats.map((c) => ({ type: c._id, count: c.count })),
+      topLocations: locationStats.map((l) => ({ location: l._id, count: l.count })),
+      timeOfDayBreakdown: timeSlots,
+      monthlyTrend: trendFormatted,
+    };
+
+    // --- Send to OpenAI ---
+    const prompt = `
+You are a senior crime intelligence analyst providing a briefing to law enforcement.
+
+Analyze the following real crime report data and generate a structured patrol briefing.
+Only use the data provided. Do not invent statistics.
+
+DATA:
+${JSON.stringify(structuredData, null, 2)}
+
+Respond in this exact JSON format:
+{
+  "situationSummary": "2-3 sentence overview of the current crime situation",
+  "riskLevel": "LOW | MEDIUM | HIGH | CRITICAL",
+  "topThreats": [
+    { "area": "area name", "crimeType": "type", "reasoning": "why this is a risk" }
+  ],
+  "patrolRecommendations": [
+    { "timing": "time slot", "area": "area", "reason": "reason" }
+  ],
+  "patternInsights": "2-3 sentences about observed patterns",
+  "safetyAdvisory": "1-2 sentences for patrol units"
+}
+`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+      max_tokens: 800,
+      response_format: { type: "json_object" },
+    });
+
+    const aiResponse = JSON.parse(completion.choices[0].message.content);
+
+    res.status(200).json({
+      success: true,
+      insights: aiResponse,
+      rawStats: structuredData,
+    });
+  } catch (error) {
+    console.error("Patrol Insights Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
 
 const getCrimeHeatmapData = async (req, res) => {
   try {
@@ -425,6 +566,7 @@ module.exports = {
   getCrimeTypeDistribution,
   getCrimeTrendStats,
   getAllReports,
-   getCrimeHeatmapData,
+  getCrimeHeatmapData,
+  getPatrolInsights,
 };
 

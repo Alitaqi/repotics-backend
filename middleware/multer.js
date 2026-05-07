@@ -41,4 +41,4 @@ const handleMulterError = (error, req, res, next) => {
   next();
 };
 
-module.exports = { upload, handleMulterError };
+module.exports = { upload, handleMulterError }; 

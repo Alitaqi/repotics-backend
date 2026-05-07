@@ -5,6 +5,7 @@ const cloudinary = require("../utils/cloudinary");
 const fs = require("fs");
 const bcrypt = require("bcrypt");
 const Post = require("../models/Post");
+const VerificationRequest = require("../models/VerificationRequest");
 
 // Create JWT token
 const createToken = (userId) => {
@@ -510,6 +511,10 @@ const updateLocation = async (req, res) => {
 
     user.location = location;
     user.coordinates = coordinates;
+    user.locationGeo = {
+      type: "Point",
+       coordinates: [parseFloat(coordinates.lng), parseFloat(coordinates.lat)], // ⚠️ lng first
+    };
     await user.save();
 
     res.json({ success: true, message: "Location updated", user });
@@ -549,13 +554,126 @@ const updatePassword = async (req, res) => {
   }
 };
 
+//admin verification plus goverment verfication
 
+// POST /api/verification/request
+const submitVerificationRequest = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { fullName, organization, role } = req.body;
 
+    // Prevent duplicate pending requests
+    const existing = await VerificationRequest.findOne({
+      user: userId,
+      status: "pending",
+    });
+
+    if (existing) {
+      return res.status(400).json({
+        message: "You already have a pending verification request.",
+      });
+    }
+
+    const request = await VerificationRequest.create({
+      user: userId,
+      fullName,
+      organization,
+      role,
+      // documentUrl can be added later if you implement uploads
+    });
+
+    res.status(201).json({
+      message: "Verification request submitted successfully",
+      request,
+    });
+  } catch (error) {
+    console.error("Submit Verification Error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// GET /api/verification/requests
+const getVerificationRequests = async (req, res) => {
+  try {
+    if (req.user.username !== "ali1") {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const requests = await VerificationRequest.find()
+      .populate("user", "username email profilePicture verified")
+      .sort({ createdAt: -1 });
+
+    res.json(requests);
+  } catch (error) {
+    console.error("Get Requests Error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// PATCH /api/verification/:id/approve
+const approveVerification = async (req, res) => {
+  try {
+    if (req.user.username !== "ali1") {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const request = await VerificationRequest.findById(req.params.id);
+    if (!request) {
+      return res.status(404).json({ message: "Request not found" });
+    }
+
+    request.status = "approved";
+    await request.save();
+
+    // 🔥 IMPORTANT: update user
+    await User.findByIdAndUpdate(request.user, {
+      verified: true,
+    });
+
+    await Notification.create({
+      recipient: userId,
+      sender: req.user.id,
+      type: "verification",
+      message: "Your account has been verified",
+    });
+
+    res.json({ message: "User verified successfully" });
+  } catch (error) {
+    console.error("Approve Error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// PATCH /api/verification/:id/reject
+const rejectVerification = async (req, res) => {
+  try {
+    if (req.user.username !== "ali1") {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const request = await VerificationRequest.findById(req.params.id);
+    if (!request) {
+      return res.status(404).json({ message: "Request not found" });
+    }
+
+    request.status = "rejected";
+    await request.save();
+
+    res.json({ message: "Request rejected" });
+  } catch (error) {
+    console.error("Reject Error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
 
 module.exports = {
   registerUser,
   loginUser,
   logoutUser,
+  submitVerificationRequest,
+  getVerificationRequests,
+  approveVerification,
+  rejectVerification,
   checkUsername,
   getUserProfile,
   getMe,

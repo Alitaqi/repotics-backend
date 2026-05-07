@@ -103,10 +103,14 @@ const postSchema = new mongoose.Schema(
     date: { type: String, required: true },
     time: { type: String, required: true },
     locationText: { type: String, required: true },
-    coordinates: {
-      lat: { type: Number },
-      lng: { type: Number },
+    locationGeo: {
+    type: {
+      type: String,
+      enum: ["Point"],
+      default: "Point"
     },
+    coordinates: [Number],
+  },
     anonymous: { type: Boolean, default: false },
     agreed: { type: Boolean, default: false },
 
@@ -115,8 +119,16 @@ const postSchema = new mongoose.Schema(
 
     // attach the AI report object
     aiReport: aiReportSchema,
+    
+    status: {
+      type: String,
+      enum: ["Reported", "Under Investigation", "Assigned", "Resolved", "Closed"],
+      default: "Reported",
+    },
   },
   { timestamps: true }
 );
+
+postSchema.index({ locationGeo: "2dsphere" });
 
 module.exports = mongoose.model("Post", postSchema);
