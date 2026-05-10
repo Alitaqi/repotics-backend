@@ -140,12 +140,10 @@ Respond in this exact JSON format:
 };
 
 
-
 const getCrimeHeatmapData = async (req, res) => {
   try {
     const { city, type, startDate, endDate } = req.query;
 
-    //  Build dynamic filters
     const query = {};
     if (city) query["locationText"] = { $regex: city, $options: "i" };
     if (type) query["crimeType"] = { $regex: type, $options: "i" };
@@ -155,19 +153,24 @@ const getCrimeHeatmapData = async (req, res) => {
       if (endDate) query["createdAt"].$lte = new Date(endDate);
     }
 
-    //  Fetch matching posts
+    // Only fetch posts that actually have coordinates
+    query["locationGeo.coordinates"] = { $exists: true, $ne: [] };
+
     const crimes = await Post.find(query).select(
-      "_id coordinates crimeType createdAt locationText"
+      "_id locationGeo crimeType createdAt locationText"
     );
 
-    //  Convert to GeoJSON format for Mapbox
     const features = crimes
-      .filter((c) => c.coordinates && c.coordinates.lat && c.coordinates.lng)
+      .filter((c) => 
+        c.locationGeo &&
+        c.locationGeo.coordinates &&
+        c.locationGeo.coordinates.length === 2
+      )
       .map((c) => ({
         type: "Feature",
         geometry: {
           type: "Point",
-          coordinates: [c.coordinates.lng, c.coordinates.lat], 
+          coordinates: c.locationGeo.coordinates, // already [lng, lat] in GeoJSON format
         },
         properties: {
           _id: c._id.toString(),
@@ -177,15 +180,57 @@ const getCrimeHeatmapData = async (req, res) => {
         },
       }));
 
-    res.json({
-      type: "FeatureCollection",
-      features,
-    });
+    res.json({ type: "FeatureCollection", features });
   } catch (error) {
     console.error("Heatmap API Error:", error);
     res.status(500).json({ message: "Failed to load heatmap data" });
   }
 };
+// const getCrimeHeatmapData = async (req, res) => {
+//   try {
+//     const { city, type, startDate, endDate } = req.query;
+
+//     //  Build dynamic filters
+//     const query = {};
+//     if (city) query["locationText"] = { $regex: city, $options: "i" };
+//     if (type) query["crimeType"] = { $regex: type, $options: "i" };
+//     if (startDate || endDate) {
+//       query["createdAt"] = {};
+//       if (startDate) query["createdAt"].$gte = new Date(startDate);
+//       if (endDate) query["createdAt"].$lte = new Date(endDate);
+//     }
+
+//     //  Fetch matching posts
+//     const crimes = await Post.find(query).select(
+//       "_id coordinates crimeType createdAt locationText"
+//     );
+
+//     //  Convert to GeoJSON format for Mapbox
+//     const features = crimes
+//       .filter((c) => c.coordinates && c.coordinates.lat && c.coordinates.lng)
+//       .map((c) => ({
+//         type: "Feature",
+//         geometry: {
+//           type: "Point",
+//           coordinates: [c.coordinates.lng, c.coordinates.lat], 
+//         },
+//         properties: {
+//           _id: c._id.toString(),
+//           crimeType: c.crimeType || "Unknown",
+//           locationText: c.locationText || "Unknown",
+//           createdAt: c.createdAt,
+//         },
+//       }));
+
+//     res.json({
+//       type: "FeatureCollection",
+//       features,
+//     });
+//   } catch (error) {
+//     console.error("Heatmap API Error:", error);
+//     res.status(500).json({ message: "Failed to load heatmap data" });
+//   }
+// };
 
 ///////////////////////////////////////////////////////////////////////////////
 // Helper function to get date range for last 3 months
