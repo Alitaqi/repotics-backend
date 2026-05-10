@@ -718,11 +718,11 @@ const getPostById = async (req, res) => {
     if (!post) return res.status(404).json({ message: "Post not found" });
 
     // Add flag stats
-    postObj.flagCount = post.flags?.length || 0;
-    postObj.flagBreakdown = (post.flags || []).reduce((acc, f) => {
-      acc[f.reason] = (acc[f.reason] || 0) + 1;
-      return acc;
-    }, {});
+    // postObj.flagCount = post.flags?.length || 0;
+    // postObj.flagBreakdown = (post.flags || []).reduce((acc, f) => {
+    //   acc[f.reason] = (acc[f.reason] || 0) + 1;
+    //   return acc;
+    // }, {});
 
     const postObj = post.toObject();
     postObj.isOwner = currentUserId && post.user._id.toString() === currentUserId.toString();
