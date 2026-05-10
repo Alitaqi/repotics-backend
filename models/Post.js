@@ -38,6 +38,7 @@ const commentSchema = new mongoose.Schema({
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
     }],
+    
     createdAt: {
       type: Date,
       default: Date.now
@@ -116,7 +117,17 @@ const postSchema = new mongoose.Schema(
 
     upvotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     downvotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-
+    flags: [
+      {
+        user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+        reason: {
+          type: String,
+          enum: ["Spam", "False Information", "Inappropriate Content", "Harassment", "Duplicate Report", "Other"],
+          required: true,
+        },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
     // attach the AI report object
     aiReport: aiReportSchema,
     

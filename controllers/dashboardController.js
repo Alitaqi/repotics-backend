@@ -609,6 +609,11 @@ const getCrimeReports = async (req, res) => {
       comments: post.comments?.length || 0,
       status: post.status || "Reported",
       aiReport: post.aiReport || null,
+      flagCount: post.flags?.length || 0,
+      flagBreakdown: (post.flags || []).reduce((acc, f) => {
+        acc[f.reason] = (acc[f.reason] || 0) + 1;
+        return acc;
+      }, {}),
     }));
 
     res.status(200).json({
@@ -637,7 +642,20 @@ const getPostById = async (req, res) => {
 
     if (!post) return res.status(404).json({ success: false, message: "Post not found" });
 
-    res.status(200).json({ success: true, data: post });
+    const flagCount = post.flags?.length || 0;
+    const flagBreakdown = (post.flags || []).reduce((acc, f) => {
+      acc[f.reason] = (acc[f.reason] || 0) + 1;
+      return acc;
+    }, {});
+
+    res.status(200).json({
+      success: true,
+      data: {
+        ...post,
+        flagCount,
+        flagBreakdown,
+      },
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

@@ -717,6 +717,13 @@ const getPostById = async (req, res) => {
 
     if (!post) return res.status(404).json({ message: "Post not found" });
 
+    // Add flag stats
+    postObj.flagCount = post.flags?.length || 0;
+    postObj.flagBreakdown = (post.flags || []).reduce((acc, f) => {
+      acc[f.reason] = (acc[f.reason] || 0) + 1;
+      return acc;
+    }, {});
+
     const postObj = post.toObject();
     postObj.isOwner = currentUserId && post.user._id.toString() === currentUserId.toString();
     
@@ -790,6 +797,9 @@ const getAllPosts = async (req, res) => {
         postObj.userVote = post.upvotes.includes(currentUserId) ? 'upvote' : 
                           post.downvotes.includes(currentUserId) ? 'downvote' : null;
       }
+      postObj.userFlagged = currentUserId 
+      ? (post.flags || []).some((f) => f.user.toString() === currentUserId.toString())
+      : false;
       
       return postObj;
     });
@@ -1226,14 +1236,15 @@ const getUserPosts = async (req, res) => {
 
       // Add userVote for post
       postObj.userVote = null;
-if (currentUserId) {
-  const upvoteIds = post.upvotes.map(id => id.toString());
-  const downvoteIds = post.downvotes.map(id => id.toString());
+      if (currentUserId) {
+        const upvoteIds = post.upvotes.map(id => id.toString());
+        const downvoteIds = post.downvotes.map(id => id.toString());
 
-  if (upvoteIds.includes(currentUserId)) postObj.userVote = "upvote";
-  else if (downvoteIds.includes(currentUserId)) postObj.userVote = "downvote";
-}
-
+        if (upvoteIds.includes(currentUserId)) postObj.userVote = "upvote";
+        else if (downvoteIds.includes(currentUserId)) postObj.userVote = "downvote";
+      }
+      // Add flagged status
+      postObj.userFlagged = (post.flags || []).some((f) => f.user.toString() === currentUserId);
 
       // Process comments
       postObj.comments = postObj.comments.map(comment => {
@@ -1579,6 +1590,9 @@ const getPersonalizedFeed = async (req, res) => {
         ? "downvote"
         : null;
 
+      // --- Flagged by user ---
+      postObj.userFlagged = (post.flags || []).some((f) => f.user.toString() === userId.toString());
+    
       // --- Process comments ---
       postObj.comments = (postObj.comments || []).map((comment) => {
         const commentUserId = comment.user?._id?.toString();
@@ -1785,6 +1799,43 @@ const getTrendingCrimes = async (req, res) => {
   }
 };
 
+const flagPost = async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const { reason } = req.body;
+    const userId = req.user.id;
+
+    const validReasons = ["Spam", "False Information", "Inappropriate Content", "Harassment", "Duplicate Report", "Other"];
+    if (!validReasons.includes(reason)) {
+      return res.status(400).json({ message: "Invalid flag reason" });
+    }
+
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    // Handle old documents that don't have flags array yet
+    if (!post.flags) post.flags = [];
+
+    const alreadyFlagged = post.flags.some(f => f.user.toString() === userId.toString());
+    if (alreadyFlagged) {
+      return res.status(400).json({ message: "You have already flagged this post" });
+    }
+
+    post.flags.push({ user: userId, reason });
+    await post.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Post flagged successfully",
+      flagCount: post.flags.length,
+      userFlagged: true,
+      userFlagReason: reason,
+    });
+  } catch (error) {
+    console.error("Flag Post Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
 
 
 module.exports = {
@@ -1806,6 +1857,7 @@ module.exports = {
   getPersonalizedFeed,
   searchPosts,
   getTrendingCrimes,
+  flagPost,
   // toggleLike,
   // addComment,
 };

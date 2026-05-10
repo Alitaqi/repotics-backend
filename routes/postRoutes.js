@@ -19,6 +19,7 @@ const {
   deleteReply,
   getPersonalizedFeed,
   searchPosts,
+  flagPost,
   getTrendingCrimes,
   // toggleLike,
   // addComment,
@@ -75,5 +76,7 @@ router.get("/searchbar/search", authMiddleware, searchPosts);
 
 //trednign crime
 router.get("/trending/trending-crimes", getTrendingCrimes);
+
+router.post("/:postId/flag", authMiddleware, flagPost);
 
 module.exports = router;
